@@ -1001,6 +1001,7 @@ jobs:
       - name: 编译 APK
         run: gradle assembleRelease
         env:
+          ANDROID_HOME: ${{ env.ANDROID_SDK_ROOT }}
           ANDROID_SDK_ROOT: ${{ env.ANDROID_SDK_ROOT }}
 
       - name: 上传 APK
