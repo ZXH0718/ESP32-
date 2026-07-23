@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">音乐传送</string>
+    <string name="btn_scan">扫描设备</string>
+    <string name="btn_stop_scan">停止扫描</string>
+    <string name="btn_disconnect">断开</string>
+    <string name="btn_pick_file">选择音频</string>
+    <string name="btn_send_file">发送</string>
+    <string name="btn_clear_history">清空</string>
+    <string name="status_disconnected">未连接</string>
+    <string name="status_scanning">正在扫描...</string>
+    <string name="status_connecting">正在连接...</string>
+    <string name="status_connected">已连接: %1$s</string>
+    <string name="status_transferring">传输中...</string>
+    <string name="file_not_selected">未选择文件</string>
+    <string name="file_selected">已选: %1$s (%2$s)</string>
+    <string name="file_size_mb">%.2f MB</string>
+    <string name="file_size_kb">%.2f KB</string>
+    <string name="progress_text">%1$d / %2$d KB (%3$d%%)</string>
+    <string name="transfer_ok">传输完成: %1$s</string>
+    <string name="transfer_err">传输失败: %1$s</string>
+    <string name="no_devices">未发现蓝牙设备</string>
+    <string name="hint_select_device">请选择 ESP32_MusicBox 设备</string>
+    <string name="hint_audio_format">支持 MP3、WAV、FLAC</string>
+    <string name="history_title">传输记录</string>
+    <string name="history_empty">暂无记录</string>
+    <string name="history_success">成功</string>
+    <string name="history_failed">失败</string>
+    <string name="history_sending">发送中</string>
+    <string name="permission_denied">缺少必要权限</string>
+    <string name="bt_not_supported">设备不支持蓝牙</string>
+    <string name="bt_not_enabled">蓝牙未开启</string>
+    <string name="conn_failed">连接失败: %1$s</string>
+    <string name="conn_lost">连接已断开</string>
+    <string name="error_invalid_file">无效的音频格式</string>
+    <string name="card_connection">蓝牙连接</string>
+    <string name="card_transfer">文件传输</string>
+</resources>
