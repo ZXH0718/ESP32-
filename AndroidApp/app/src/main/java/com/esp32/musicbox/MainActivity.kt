@@ -387,7 +387,6 @@ class MainActivity : AppCompatActivity() {
             deviceContainer.visibility = View.GONE
             tvNoDevices.visibility = View.GONE
             updateSendBtn()
-                    cardRemote.visibility = View.VISIBLE
                     btnSyncTime.visibility = View.VISIBLE
                     tvRemoteVolume.visibility = View.VISIBLE
                     snack("已连接到 ${device.name}")
@@ -441,7 +440,6 @@ class MainActivity : AppCompatActivity() {
         setDotColor(R.color.status_disconnected)
         btnDisconnect.visibility = View.GONE
         btnScan.visibility = View.VISIBLE
-        cardRemote.visibility = View.GONE
         btnSyncTime.visibility = View.GONE
         tvRemoteVolume.visibility = View.GONE
         tvRemoteStatus.text = getString(R.string.remote_status)
@@ -466,7 +464,6 @@ class MainActivity : AppCompatActivity() {
             progressBar.visibility = View.GONE
             tvProgress.visibility = View.GONE
             updateSendingRecord(false, "连接已断开")
-            cardRemote.visibility = View.GONE
             btnSyncTime.visibility = View.GONE
             tvRemoteVolume.visibility = View.GONE
             snack(getString(R.string.conn_lost))
