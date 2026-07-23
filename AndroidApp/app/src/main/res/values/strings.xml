@@ -35,4 +35,15 @@
     <string name="error_invalid_file">无效的音频格式</string>
     <string name="card_connection">蓝牙连接</string>
     <string name="card_transfer">文件传输</string>
+    <string name="card_remote">遥控器</string>
+    <string name="btn_play_pause">播放/暂停</string>
+    <string name="btn_prev">上一首</string>
+    <string name="btn_next">下一首</string>
+    <string name="btn_vol_up">音量+</string>
+    <string name="btn_vol_down">音量-</string>
+    <string name="remote_status">等待连接...</string>
+    <string name="remote_playing">正在播放: %1$s</string>
+    <string name="remote_paused">已暂停: %1$s</string>
+    <string name="remote_volume">音量: %1$d/21</string>
+    <string name="remote_song_info">歌曲 %1$d/%2$d</string>
 </resources>

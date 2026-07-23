@@ -70,6 +70,19 @@
   ESP32 -> 手机:
     收到完整文件后发送 "OK\n"
     接收出错发送 "ERR\n"
+
+  ========== 蓝牙遥控命令协议 ==========
+  在 BT_IDLE 状态下（无文件传输时），手机发送单字节命令:
+    0xC0 → 播放/暂停（togglePause，未播放则播放 currentIndex 指向歌曲）
+    0xC1 → 上一首（playPrevious）
+    0xC2 → 下一首（playNext）
+    0xC3 → 音量+（最大21）
+    0xC4 → 音量-（最小0）
+    0xC5 → 获取状态（回复 JSON: {"playing":bool,"paused":bool,"vol":int,"song":"name","index":int,"total":int}）
+
+  ESP32 -> 手机:
+    0xC0-0xC4 命令执行后回复 "OK\n"
+    0xC5 回复 JSON 状态字符串 + "\n"
 */
 
 #include <Arduino.h>
@@ -209,6 +222,75 @@ void loop() {
   }
 }
 
+// ===================== 蓝牙遥控命令处理 =====================
+void handleBtCommand(uint8_t cmd) {
+  switch (cmd) {
+    case 0xC0: // 播放/暂停
+      if (!isPlaying && !isPaused) {
+        // 当前没有在播放，播放 currentIndex 指向的歌曲
+        playFile(currentIndex);
+      } else {
+        togglePause();
+      }
+      SerialBT.write("OK\n");
+      break;
+
+    case 0xC1: // 上一首
+      playPrevious();
+      SerialBT.write("OK\n");
+      break;
+
+    case 0xC2: // 下一首
+      playNext();
+      SerialBT.write("OK\n");
+      break;
+
+    case 0xC3: // 音量+
+      if (volume < 21) {
+        volume++;
+        audio.setVolume(volume);
+        if (screen == PLAYING) drawVolumeBar();
+      }
+      SerialBT.write("OK\n");
+      break;
+
+    case 0xC4: // 音量-
+      if (volume > 0) {
+        volume--;
+        audio.setVolume(volume);
+        if (screen == PLAYING) drawVolumeBar();
+      }
+      SerialBT.write("OK\n");
+      break;
+
+    case 0xC5: // 获取状态
+      {
+        String song = "";
+        if (playingIndex >= 0 && playingIndex < fileCount) {
+          song = fileList[playingIndex];
+        }
+        String json = "{\"playing\":";
+        json += isPlaying ? "true" : "false";
+        json += ",\"paused\":";
+        json += isPaused ? "true" : "false";
+        json += ",\"vol\":";
+        json += String(volume);
+        json += ",\"song\":\"";
+        json += song;
+        json += "\",\"index\":";
+        json += String(playingIndex >= 0 ? playingIndex + 1 : 0);
+        json += ",\"total\":";
+        json += String(fileCount);
+        json += "}\n";
+        SerialBT.write(json.c_str());
+      }
+      break;
+
+    default:
+      break;
+  }
+}
+
 // ===================== 蓝牙接收处理 =====================
 void handleBluetooth() {
   if (!btConnected) return;
@@ -224,8 +306,12 @@ void handleBluetooth() {
 
     switch (btState) {
       case BT_IDLE:
+        // 蓝牙遥控命令（0xC0-0xC5）
+        if (b >= 0xC0 && b <= 0xC5) {
+          handleBtCommand(b);
+        }
         // 等待起始标记 0xAB
-        if (b == 0xAB) {
+        else if (b == 0xAB) {
           btState = BT_RECV_NAME;
           btFileName = "";
           btFileSize = 0;

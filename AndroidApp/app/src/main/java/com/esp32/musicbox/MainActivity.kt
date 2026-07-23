@@ -68,6 +68,14 @@ class MainActivity : AppCompatActivity() {
     private lateinit var tvHistory: TextView
     private lateinit var tvEmptyHistory: TextView
     private lateinit var btnClearHistory: com.google.android.material.button.MaterialButton
+    private lateinit var cardRemote: com.google.android.material.card.MaterialCardView
+    private lateinit var tvRemoteStatus: TextView
+    private lateinit var tvRemoteVolume: TextView
+    private lateinit var btnPlayPause: com.google.android.material.button.MaterialButton
+    private lateinit var btnPrev: com.google.android.material.button.MaterialButton
+    private lateinit var btnNext: com.google.android.material.button.MaterialButton
+    private lateinit var btnVolUp: com.google.android.material.button.MaterialButton
+    private lateinit var btnVolDown: com.google.android.material.button.MaterialButton
 
     private val executor = Executors.newSingleThreadExecutor()
     private val handler = Handler(Looper.getMainLooper())
@@ -123,6 +131,19 @@ class MainActivity : AppCompatActivity() {
             history.clear()
             refreshHistory()
         }
+                  cardRemote = findViewById(R.id.card_remote)
+                  tvRemoteStatus = findViewById(R.id.tv_remote_status)
+                  tvRemoteVolume = findViewById(R.id.tv_remote_volume)
+                  btnPlayPause = findViewById(R.id.btn_play_pause)
+                  btnPrev = findViewById(R.id.btn_prev)
+                  btnNext = findViewById(R.id.btn_next)
+                  btnVolUp = findViewById(R.id.btn_vol_up)
+                  btnVolDown = findViewById(R.id.btn_vol_down)
+                  btnPlayPause.setOnClickListener { sendBtCommand(0xC0.toByte()) }
+                  btnPrev.setOnClickListener { sendBtCommand(0xC1.toByte()) }
+                  btnNext.setOnClickListener { sendBtCommand(0xC2.toByte()) }
+                  btnVolUp.setOnClickListener { sendBtCommand(0xC3.toByte()) }
+                  btnVolDown.setOnClickListener { sendBtCommand(0xC4.toByte()) }
     }
 
     private fun initLaunchers() {
@@ -363,6 +384,8 @@ class MainActivity : AppCompatActivity() {
             deviceContainer.visibility = View.GONE
             tvNoDevices.visibility = View.GONE
             updateSendBtn()
+                    cardRemote.visibility = View.VISIBLE
+                    tvRemoteVolume.visibility = View.VISIBLE
             snack("已连接到 ${device.name}")
         }
         startReceive(socket)
@@ -382,6 +405,7 @@ class MainActivity : AppCompatActivity() {
                             Log.d(TAG, "ESP32回复: $reply")
                             handler.post {
                                 when {
+                                    reply.startsWith("{") -> handleStatusJson(reply)
                                     reply.startsWith("OK") -> updateSendingRecord(true)
                                     reply.startsWith("ERR") -> updateSendingRecord(false, "设备错误: $reply")
                                 }
@@ -413,6 +437,9 @@ class MainActivity : AppCompatActivity() {
         setDotColor(R.color.status_disconnected)
         btnDisconnect.visibility = View.GONE
         btnScan.visibility = View.VISIBLE
+        cardRemote.visibility = View.GONE
+        tvRemoteVolume.visibility = View.GONE
+        tvRemoteStatus.text = getString(R.string.remote_status)
         updateSendBtn()
     }
 
@@ -434,6 +461,8 @@ class MainActivity : AppCompatActivity() {
             progressBar.visibility = View.GONE
             tvProgress.visibility = View.GONE
             updateSendingRecord(false, "连接已断开")
+            cardRemote.visibility = View.GONE
+            tvRemoteVolume.visibility = View.GONE
             snack(getString(R.string.conn_lost))
         }
     }
@@ -658,6 +687,41 @@ class MainActivity : AppCompatActivity() {
 
     private fun snack(msg: String) {
         Snackbar.make(findViewById(android.R.id.content), msg, Snackbar.LENGTH_LONG).show()
+    }
+
+    private fun sendBtCommand(cmd: Byte) {
+        if (!connected || transferring) return
+        executor.execute {
+            try {
+                btSocket?.outputStream?.write(byteArrayOf(cmd))
+                btSocket?.outputStream?.flush()
+                // 发送播放控制命令后自动查询状态
+                if (cmd in 0xC0..0xC4) {
+                    SystemClock.sleep(200)
+                    btSocket?.outputStream?.write(byteArrayOf(0xC5))
+                    btSocket?.outputStream?.flush()
+                }
+            } catch (e: IOException) {
+                handler.post { handleLost() }
+            }
+        }
+    }
+
+    private fun handleStatusJson(json: String) {
+        try {
+            val obj = org.json.JSONObject(json)
+            val playing = obj.optBoolean("playing", false)
+            val paused = obj.optBoolean("paused", false)
+            val vol = obj.optInt("vol", 0)
+            val song = obj.optString("song", "")
+            val idx = obj.optInt("index", 0)
+            val total = obj.optInt("total", 0)
+            if (playing) tvRemoteStatus.text = getString(R.string.remote_playing, song)
+            else if (paused) tvRemoteStatus.text = getString(R.string.remote_paused, song)
+            else tvRemoteStatus.text = getString(R.string.remote_status)
+            tvRemoteVolume.text = getString(R.string.remote_volume, vol)
+            tvRemoteVolume.visibility = View.VISIBLE
+        } catch (_: Exception) {}
     }
 
     // ==================== 广播 ====================
