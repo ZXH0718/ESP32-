@@ -373,7 +373,7 @@ class MainActivity : AppCompatActivity() {
             try {
                 val ins = socket.inputStream
                 val buf = ByteArray(256)
-                while (connected && !socket.isClosed) {
+                while (connected && socket.isConnected) {
                     val avail = ins.available()
                     if (avail > 0) {
                         val n = ins.read(buf, 0, minOf(avail, buf.size))
