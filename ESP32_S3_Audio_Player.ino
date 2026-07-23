@@ -165,9 +165,9 @@ bool btRecvTime = false;
 #define SCREEN_W        240
 #define SCREEN_H        240
 #define ROW_HEIGHT      22
-#define HEADER_H        24
+#define HEADER_H        34
 #define FOOTER_H        18
-#define VISIBLE_ROWS    9
+#define VISIBLE_ROWS    8
 
 // ===================== 蓝牙回调 =====================
 void btCallback(esp_spp_cb_event_t event, esp_spp_cb_param_t *param) {
@@ -700,33 +700,64 @@ void drawListScreen() {
   tft.fillScreen(BG_COLOR);
 
   tft.fillRect(0, 0, SCREEN_W, HEADER_H, TFT_DARKGREY);
+
+  // 第一行: Music 序号 + 时钟
   tft.setTextColor(TFT_WHITE, TFT_DARKGREY);
   tft.setTextSize(2);
   tft.setTextDatum(TL_DATUM);
-  tft.setCursor(4, 4);
+  tft.setCursor(4, 2);
   tft.printf("Music %d/%d", currentIndex + 1, fileCount);
 
-  if (playingIndex >= 0) {
-    tft.setTextColor(PLAYING_COLOR, TFT_DARKGREY);
-    tft.setTextDatum(TR_DATUM);
-    tft.drawString("PLAY", SCREEN_W - 4, 4);
-    tft.setTextDatum(TL_DATUM);
-  }
-
-  // 蓝牙状态指示
-  tft.setTextSize(1);
-  tft.setTextColor(btConnected ? BT_COLOR : TFT_DARKGREY, TFT_DARKGREY);
-  tft.setCursor(4, 14);
-  tft.print(btConnected ? "BT" : "");
-
-  // 时钟显示
   if (timeSynced) {
     unsigned long t = getCurrentTime();
     unsigned int h = (t % 86400UL) / 3600UL;
     unsigned int m = (t % 3600UL) / 60UL;
-    unsigned int s = t % 60UL;
-    tft.setCursor(SCREEN_W - 54, 4);
-    tft.printf("%02d:%02d", h, m);
+    tft.setTextColor(TFT_CYAN, TFT_DARKGREY);
+    tft.setTextDatum(TR_DATUM);
+    tft.drawString(String::format("%02d:%02d", h, m).c_str(), SCREEN_W - 4, 2);
+  }
+
+  // 第二行: 蓝牙状态 + 年月日
+  tft.setTextSize(1);
+  tft.setTextDatum(TL_DATUM);
+  tft.setCursor(4, 18);
+  if (btConnected) {
+    tft.setTextColor(BT_COLOR, TFT_DARKGREY);
+    tft.print("BT");
+  }
+
+  if (timeSynced) {
+    unsigned long t = getCurrentTime();
+    unsigned long days = t / 86400UL;
+    unsigned int y = 1970;
+    // 计算年月日
+    static const uint8_t daysInMonth[] = {31,28,31,30,31,30,31,31,30,31,30,31};
+    while (1) {
+      unsigned int daysInYear = 365;
+      if ((y % 4 == 0 && y % 100 != 0) || y % 400 == 0) daysInYear = 366;
+      if (days < (unsigned long)daysInYear) break;
+      days -= daysInYear;
+      y++;
+    }
+    bool leap = (y % 4 == 0 && y % 100 != 0) || y % 400 == 0;
+    unsigned int mo = 0;
+    for (; mo < 12; mo++) {
+      unsigned int dim = daysInMonth[mo];
+      if (mo == 1 && leap) dim = 29;
+      if (days < (unsigned long)dim) break;
+      days -= dim;
+    }
+    unsigned int d = (unsigned int)(days + 1);
+    tft.setTextColor(TFT_LIGHTGREY, TFT_DARKGREY);
+    tft.setTextDatum(TR_DATUM);
+    tft.drawString(String::format("%d.%d.%d", y, mo + 1, d).c_str(), SCREEN_W - 4, 18);
+  } else {
+    // 未同步时间时，PLAY 指示放右上角
+    if (playingIndex >= 0) {
+      tft.setTextColor(PLAYING_COLOR, TFT_DARKGREY);
+      tft.setTextDatum(TR_DATUM);
+      tft.drawString("PLAY", SCREEN_W - 4, 18);
+    }
   }
 
   tft.setTextSize(1);
