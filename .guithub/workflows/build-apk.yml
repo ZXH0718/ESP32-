@@ -1,0 +1,571 @@
+name: 一键编译APK
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 生成全部项目文件
+        run: |
+          mkdir -p app/src/main/java/com/esp32/musicbox
+          mkdir -p app/src/main/res/drawable
+          mkdir -p app/src/main/res/layout
+          mkdir -p app/src/main/res/values
+          mkdir -p app/src/main/res/mipmap-hdpi
+
+          cat > settings.gradle << 'ENDFILE'
+          pluginManagement {
+              repositories {
+                  google()
+                  mavenCentral()
+                  gradlePluginPortal()
+              }
+          }
+          dependencyResolutionManagement {
+              repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+              repositories {
+                  google()
+                  mavenCentral()
+              }
+          }
+          rootProject.name = "MusicSender"
+          include(":app")
+          ENDFILE
+
+          cat > build.gradle << 'ENDFILE'
+          plugins {
+              id("com.android.application") version "8.2.0" apply false
+              id("org.jetbrains.kotlin.android") version "1.9.20" apply false
+          }
+          ENDFILE
+
+          cat > gradle.properties << 'ENDFILE'
+          org.gradle.jvmargs=-Xmx2048m -Dfile.encoding=UTF-8
+          android.useAndroidX=true
+          kotlin.code.style=official
+          android.nonTransitiveRClass=true
+          ENDFILE
+
+          cat > app/build.gradle << 'ENDFILE'
+          plugins {
+              id("com.android.application")
+              id("org.jetbrains.kotlin.android")
+          }
+          android {
+              namespace = "com.esp32.musicbox"
+              compileSdk = 34
+              defaultConfig {
+                  applicationId = "com.esp32.musicbox"
+                  minSdk = 21
+                  targetSdk = 34
+                  versionCode = 1
+                  versionName = "1.0.0"
+              }
+              buildTypes {
+                  release {
+                      isMinifyEnabled = false
+                  }
+              }
+              compileOptions {
+                  sourceCompatibility = JavaVersion.VERSION_1_8
+                  targetCompatibility = JavaVersion.VERSION_1_8
+              }
+              kotlinOptions {
+                  jvmTarget = "1.8"
+              }
+          }
+          dependencies {
+              implementation("androidx.core:core-ktx:1.12.0")
+              implementation("androidx.appcompat:appcompat:1.6.1")
+              implementation("com.google.android.material:material:1.11.0")
+              implementation("androidx.constraintlayout:constraintlayout:2.1.4")
+              implementation("androidx.activity:activity-ktx:1.8.2")
+          }
+          ENDFILE
+
+          cat > app/src/main/AndroidManifest.xml << 'ENDFILE'
+          <?xml version="1.0" encoding="utf-8"?>
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+              <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />
+              <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" android:maxSdkVersion="30" />
+              <uses-permission android:name="android.permission.BLUETOOTH_SCAN" />
+              <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+              <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+              <uses-permission android:name="android.permission.READ_MEDIA_AUDIO" />
+              <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
+              <application
+                  android:allowBackup="true"
+                  android:icon="@android:drawable/ic_media_play"
+                  android:label="@string/app_name"
+                  android:supportsRtl="true"
+                  android:theme="@style/Theme.MusicSender">
+                  <activity
+                      android:name=".MainActivity"
+                      android:exported="true">
+                      <intent-filter>
+                          <action android:name="android.intent.action.MAIN" />
+                          <category android:name="android.intent.category.LAUNCHER" />
+                      </intent-filter>
+                  </activity>
+              </application>
+          </manifest>
+          ENDFILE
+
+      - name: 写入 Kotlin 源码
+        run: |
+          cat > app/src/main/java/com/esp32/musicbox/MainActivity.kt << 'ENDFILE'
+          package com.esp32.musicbox
+
+          import android.Manifest
+          import android.annotation.SuppressLint
+          import android.bluetooth.*
+          import android.content.BroadcastReceiver
+          import android.content.Context
+          import android.content.Intent
+          import android.content.IntentFilter
+          import android.content.pm.PackageManager
+          import android.graphics.drawable.GradientDrawable
+          import android.os.*
+          import android.util.Log
+          import android.view.Gravity
+          import android.view.View
+          import android.widget.LinearLayout
+          import android.widget.TextView
+          import androidx.activity.result.ActivityResultLauncher
+          import androidx.activity.result.contract.ActivityResultContracts
+          import androidx.appcompat.app.AppCompatActivity
+          import androidx.core.content.ContextCompat
+          import com.google.android.material.progressindicator.LinearProgressIndicator
+          import com.google.android.material.snackbar.Snackbar
+          import java.io.IOException
+          import java.text.SimpleDateFormat
+          import java.util.*
+          import java.util.concurrent.Executors
+
+          class MainActivity : AppCompatActivity() {
+              companion object {
+                  private const val TAG = "MusicSender"
+                  private val UUID_SPP = UUID.fromString("00001101-0000-1000-8000-00805F9B34FB")
+                  private const val TARGET = "ESP32_MusicBox"
+                  private const val HEADER = 0xAB.toByte()
+                  private const val BUF = 1024
+                  private const val REPLY_TIMEOUT = 30000L
+              }
+              private var btAdapter: BluetoothAdapter? = null
+              private var btSocket: BluetoothSocket? = null
+              private var btDevice: BluetoothDevice? = null
+              private var scanning = false
+              private var connected = false
+              private val devices = mutableListOf<BluetoothDevice>()
+              private var fileUri: android.net.Uri? = null
+              private var fileName: String? = null
+              private var fileSize: Long = 0
+              private var transferring = false
+              data class Record(val name: String, val size: Long, val status: Int, val time: String)
+              private val history = mutableListOf<Record>()
+              private lateinit var statusDot: View
+              private lateinit var tvStatus: TextView
+              private lateinit var deviceContainer: LinearLayout
+              private lateinit var tvNoDevices: TextView
+              private lateinit var btnScan: com.google.android.material.button.MaterialButton
+              private lateinit var btnDisconnect: com.google.android.material.button.MaterialButton
+              private lateinit var tvFileInfo: TextView
+              private lateinit var progressBar: LinearProgressIndicator
+              private lateinit var tvProgress: TextView
+              private lateinit var btnPickFile: com.google.android.material.button.MaterialButton
+              private lateinit var btnSendFile: com.google.android.material.button.MaterialButton
+              private lateinit var tvHistory: TextView
+              private lateinit var tvEmptyHistory: TextView
+              private lateinit var btnClearHistory: com.google.android.material.button.MaterialButton
+              private val executor = Executors.newSingleThreadExecutor()
+              private val handler = Handler(Looper.getMainLooper())
+              private lateinit var permLauncher: ActivityResultLauncher<Array<String>>
+              private lateinit var fileLauncher: ActivityResultLauncher<Intent>
+              private lateinit var btEnableLauncher: ActivityResultLauncher<Intent>
+
+              override fun onCreate(savedInstanceState: Bundle?) {
+                  super.onCreate(savedInstanceState)
+                  setContentView(R.layout.activity_main)
+                  initViews()
+                  initLaunchers()
+                  initBluetooth()
+                  checkPermissions()
+              }
+              override fun onDestroy() {
+                  super.onDestroy()
+                  stopScan()
+                  disconnect()
+                  executor.shutdown()
+              }
+              private fun initViews() {
+                  statusDot = findViewById(R.id.status_dot)
+                  tvStatus = findViewById(R.id.tv_status)
+                  deviceContainer = findViewById(R.id.device_list_container)
+                  tvNoDevices = findViewById(R.id.tv_no_devices)
+                  btnScan = findViewById(R.id.btn_scan)
+                  btnDisconnect = findViewById(R.id.btn_disconnect)
+                  tvFileInfo = findViewById(R.id.tv_file_info)
+                  progressBar = findViewById(R.id.progress_bar)
+                  tvProgress = findViewById(R.id.tv_progress)
+                  btnPickFile = findViewById(R.id.btn_pick_file)
+                  btnSendFile = findViewById(R.id.btn_send_file)
+                  tvHistory = findViewById(R.id.tv_history)
+                  tvEmptyHistory = findViewById(R.id.tv_empty_history)
+                  btnClearHistory = findViewById(R.id.btn_clear_history)
+                  btnScan.setOnClickListener {
+                      if (scanning) stopScan()
+                      else if (hasPerms()) {
+                          if (btAdapter?.isEnabled == true) startScan()
+                          else btEnableLauncher.launch(Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE))
+                      } else checkPermissions()
+                  }
+                  btnDisconnect.setOnClickListener { disconnect() }
+                  btnPickFile.setOnClickListener { pickFile() }
+                  btnSendFile.setOnClickListener { sendFile() }
+                  btnClearHistory.setOnClickListener { history.clear(); refreshHistory() }
+              }
+              private fun initLaunchers() {
+                  permLauncher = registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { perms ->
+                      if (perms.entries.all { it.value }) onPermsGranted() else snack("缺少必要权限")
+                  }
+                  fileLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+                      if (result.resultCode == RESULT_OK) result.data?.data?.let { onFilePicked(it) }
+                  }
+                  btEnableLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+                      if (result.resultCode == RESULT_OK) onBtEnabled()
+                      else { tvStatus.text = "蓝牙未开启"; setDotColor(R.color.status_disconnected) }
+                  }
+              }
+              private fun initBluetooth() {
+                  btAdapter = (getSystemService(Context.BLUETOOTH_SERVICE) as? BluetoothManager)?.adapter
+                  if (btAdapter == null) { tvStatus.text = "设备不支持蓝牙"; btnScan.isEnabled = false }
+              }
+              private fun checkPermissions() {
+                  val list = mutableListOf<String>()
+                  if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                      if (ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_SCAN) != PackageManager.PERMISSION_GRANTED) list.add(Manifest.permission.BLUETOOTH_SCAN)
+                      if (ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED) list.add(Manifest.permission.BLUETOOTH_CONNECT)
+                  } else {
+                      if (ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) list.add(Manifest.permission.ACCESS_FINE_LOCATION)
+                  }
+                  if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                      if (ContextCompat.checkSelfPermission(this, Manifest.permission.READ_MEDIA_AUDIO) != PackageManager.PERMISSION_GRANTED) list.add(Manifest.permission.READ_MEDIA_AUDIO)
+                  } else {
+                      if (ContextCompat.checkSelfPermission(this, Manifest.permission.READ_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED) list.add(Manifest.permission.READ_EXTERNAL_STORAGE)
+                  }
+                  if (list.isNotEmpty()) permLauncher.launch(list.toTypedArray()) else onPermsGranted()
+              }
+              private fun hasPerms(): Boolean {
+                  return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                      ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_SCAN) == PackageManager.PERMISSION_GRANTED &&
+                      ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED
+                  } else {
+                      ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
+                  }
+              }
+              private fun onPermsGranted() {
+                  if (btAdapter?.isEnabled == true) onBtEnabled()
+                  else btEnableLauncher.launch(Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE))
+              }
+              @SuppressLint("MissingPermission")
+              private fun onBtEnabled() {
+                  tvStatus.text = getString(R.string.status_disconnected)
+                  setDotColor(R.color.status_disconnected)
+                  loadBonded()
+                  startScan()
+              }
+              @SuppressLint("MissingPermission")
+              private fun loadBonded() {
+                  btAdapter?.bondedDevices?.find { it.name == TARGET }?.let {
+                      devices.clear(); devices.add(it); refreshDeviceList()
+                  }
+              }
+              @SuppressLint("MissingPermission")
+              private fun startScan() {
+                  if (scanning || transferring) return
+                  btAdapter ?: return
+                  devices.clear()
+                  btAdapter?.bondedDevices?.forEach { d ->
+                      if (d.name == TARGET && devices.none { it.address == d.address }) devices.add(d)
+                  }
+                  scanning = true
+                  updateScanUI(true)
+                  executor.execute {
+                      try { btAdapter?.startDiscovery() }
+                      catch (e: SecurityException) { handler.post { scanning = false; updateScanUI(false) } }
+                      catch (_: Exception) { handler.post { scanning = false; updateScanUI(false) } }
+                  }
+                  handler.postDelayed({ if (scanning) stopScan() }, 12000)
+              }
+              @SuppressLint("MissingPermission")
+              private fun stopScan() {
+                  if (!scanning) return
+                  scanning = false
+                  try { btAdapter?.cancelDiscovery() } catch (_: SecurityException) {}
+                  updateScanUI(false)
+              }
+              private fun updateScanUI(isScanning: Boolean) {
+                  if (isScanning) {
+                      btnScan.text = getString(R.string.btn_stop_scan)
+                      tvStatus.text = getString(R.string.status_scanning)
+                      setDotColor(R.color.status_scanning)
+                  } else {
+                      btnScan.text = getString(R.string.btn_scan)
+                      if (!connected) { tvStatus.text = getString(R.string.status_disconnected); setDotColor(R.color.status_disconnected) }
+                  }
+                  refreshDeviceList()
+              }
+              private fun refreshDeviceList() {
+                  deviceContainer.removeAllViews()
+                  if (devices.isEmpty()) {
+                      deviceContainer.visibility = View.GONE
+                      tvNoDevices.visibility = View.VISIBLE
+                      if (!scanning) tvNoDevices.text = getString(R.string.no_devices)
+                  } else {
+                      deviceContainer.visibility = View.VISIBLE
+                      tvNoDevices.visibility = View.GONE
+                      devices.forEach { d ->
+                          val name = try { d.name ?: "未知" } catch (_: SecurityException) { "无权限" }
+                          val tv = TextView(this).apply {
+                              text = "$name\n${d.address}"
+                              textSize = 14f
+                              setPadding(16, 12, 16, 12)
+                              setTextColor(if (name == TARGET) ContextCompat.getColor(this@MainActivity, R.color.primary) else ContextCompat.getColor(this@MainActivity, R.color.text_primary))
+                              setBackgroundResource(android.R.drawable.list_selector_background)
+                              isClickable = true
+                              isFocusable = true
+                              gravity = Gravity.CENTER_VERTICAL
+                              setOnClickListener { if (!connected && !transferring) connectDevice(d) }
+                          }
+                          deviceContainer.addView(tv)
+                          if (d != devices.last()) {
+                              val div = View(this).apply {
+                                  layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 1)
+                                  setBackgroundColor(ContextCompat.getColor(this@MainActivity, R.color.divider))
+                              }
+                              deviceContainer.addView(div)
+                          }
+                      }
+                  }
+              }
+              @SuppressLint("MissingPermission")
+              private fun connectDevice(device: BluetoothDevice) {
+                  if (connected || transferring) return
+                  stopScan()
+                  tvStatus.text = getString(R.string.status_connecting)
+                  setDotColor(R.color.status_scanning)
+                  executor.execute {
+                      var socket: BluetoothSocket? = null
+                      try {
+                          socket = device.createRfcommSocketToServiceRecord(UUID_SPP)
+                          btSocket = socket
+                          socket.connect()
+                          onConnected(device, socket)
+                      } catch (e: IOException) {
+                          try { socket?.close() } catch (_: IOException) {}
+                          var fb: BluetoothSocket? = null
+                          try {
+                              val m = device.javaClass.getMethod("createRfcommSocket", Int::class.javaPrimitiveType)
+                              fb = m.invoke(device, 1) as BluetoothSocket
+                              btSocket = fb
+                              fb.connect()
+                              onConnected(device, fb)
+                          } catch (e2: Exception) {
+                              closeQuietly(fb)
+                              handler.post { showConnError(e2.message ?: "未知错误") }
+                          }
+                      } catch (e: SecurityException) {
+                          closeQuietly(socket)
+                          handler.post { showConnError("安全异常: ${e.message}") }
+                      }
+                  }
+              }
+              @SuppressLint("MissingPermission")
+              private fun onConnected(device: BluetoothDevice, socket: BluetoothSocket) {
+                  btDevice = device
+                  connected = true
+                  handler.post {
+                      tvStatus.text = getString(R.string.status_connected, device.name)
+                      setDotColor(R.color.status_connected)
+                      btnDisconnect.visibility = View.VISIBLE
+                      btnScan.visibility = View.GONE
+                      deviceContainer.visibility = View.GONE
+                      tvNoDevices.visibility = View.GONE
+                      updateSendBtn()
+                      snack("已连接到 ${device.name}")
+                  }
+                  startReceive(socket)
+              }
+              private fun startReceive(socket: BluetoothSocket) {
+                  executor.execute {
+                      try {
+                          val ins = socket.inputStream
+                          val buf = ByteArray(256)
+                          while (connected && !socket.isClosed) {
+                              val avail = ins.available()
+                              if (avail > 0) {
+                                  val n = ins.read(buf, 0, minOf(avail, buf.size))
+                                  if (n > 0) {
+                                      val reply = String(buf, 0, n).trim()
+                                      Log.d(TAG, "ESP32回复: $reply")
+                                      handler.post {
+                                          when {
+                                              reply.startsWith("OK") -> updateSendingRecord(true)
+                                              reply.startsWith("ERR") -> updateSendingRecord(false, "设备错误: $reply")
+                                          }
+                                      }
+                                  }
+                              } else SystemClock.sleep(100)
+                          }
+                      } catch (_: IOException) {
+                          if (connected) handler.post { handleLost() }
+                      }
+                  }
+              }
+              private fun showConnError(msg: String) {
+                  tvStatus.text = getString(R.string.conn_failed, msg)
+                  setDotColor(R.color.status_error)
+                  snack(getString(R.string.conn_failed, msg))
+              }
+              private fun disconnect() {
+                  if (transferring) { snack("文件传输中，请等待完成"); return }
+                  connected = false
+                  btDevice = null
+                  executor.execute { try { btSocket?.close() } catch (_: IOException) {}; btSocket = null }
+                  tvStatus.text = getString(R.string.status_disconnected)
+                  setDotColor(R.color.status_disconnected)
+                  btnDisconnect.visibility = View.GONE
+                  btnScan.visibility = View.VISIBLE
+                  updateSendBtn()
+              }
+              private fun handleLost() {
+                  if (!connected) return
+                  connected = false; btDevice = null; transferring = false
+                  executor.execute { try { btSocket?.close() } catch (_: IOException) {}; btSocket = null }
+                  handler.post {
+                      tvStatus.text = getString(R.string.conn_lost)
+                      setDotColor(R.color.status_error)
+                      btnDisconnect.visibility = View.GONE
+                      btnScan.visibility = View.VISIBLE
+                      btnSendFile.isEnabled = false
+                      progressBar.visibility = View.GONE
+                      tvProgress.visibility = View.GONE
+                      updateSendingRecord(false, "连接已断开")
+                      snack(getString(R.string.conn_lost))
+                  }
+              }
+              private fun closeQuietly(s: BluetoothSocket?) { try { s?.close() } catch (_: IOException) {} }
+              private fun pickFile() {
+                  val intent = Intent(Intent.ACTION_GET_CONTENT).apply {
+                      type = "audio/*"
+                      addCategory(Intent.CATEGORY_OPENABLE)
+                      putExtra(Intent.EXTRA_MIME_TYPES, arrayOf("audio/mpeg", "audio/wav", "audio/x-wav", "audio/flac", "audio/x-flac"))
+                  }
+                  fileLauncher.launch(Intent.createChooser(intent, "选择音频文件"))
+              }
+              private fun onFilePicked(uri: android.net.Uri) {
+                  fileUri = uri
+                  fileName = queryName(uri)
+                  fileSize = querySize(uri)
+                  val ext = fileName?.substringAfterLast('.', "")?.lowercase() ?: ""
+                  if (ext !in listOf("mp3", "wav", "flac")) {
+                      snack(getString(R.string.error_invalid_file))
+                      fileUri = null; fileName = null; fileSize = 0
+                      tvFileInfo.text = getString(R.string.file_not_selected)
+                      updateSendBtn()
+                      return
+                  }
+                  tvFileInfo.text = getString(R.string.file_selected, fileName, fmtSize(fileSize))
+                  updateSendBtn()
+              }
+              private fun queryName(uri: android.net.Uri): String {
+                  var name = "未知文件"
+                  contentResolver.query(uri, null, null, null, null)?.use { c ->
+                      val i = c.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
+                      if (c.moveToFirst() && i >= 0) name = c.getString(i)
+                  }
+                  return name
+              }
+              private fun querySize(uri: android.net.Uri): Long {
+                  var size = 0L
+                  contentResolver.query(uri, null, null, null, null)?.use { c ->
+                      val i = c.getColumnIndex(android.provider.OpenableColumns.SIZE)
+                      if (c.moveToFirst() && i >= 0) size = c.getLong(i)
+                  }
+                  return size
+              }
+              private fun fmtSize(s: Long): String = when {
+                  s >= 1024 * 1024 -> String.format(getString(R.string.file_size_mb), s / (1024.0 * 1024.0))
+                  s >= 1024 -> String.format(getString(R.string.file_size_kb), s / 1024.0)
+                  else -> "$s B"
+              }
+              private fun sendFile() {
+                  val uri = fileUri ?: return
+                  val name = fileName ?: return
+                  if (!connected) { snack("请先连接设备"); return }
+                  if (transferring) { snack("正在传输中"); return }
+                  transferring = true
+                  btnSendFile.isEnabled = false
+                  btnPickFile.isEnabled = false
+                  progressBar.visibility = View.VISIBLE
+                  progressBar.isIndeterminate = false
+                  progressBar.progress = 0
+                  tvProgress.visibility = View.VISIBLE
+                  tvStatus.text = getString(R.string.status_transferring)
+                  setDotColor(R.color.status_transferring)
+                  val time = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date())
+                  history.add(0, Record(name, fileSize, 2, time))
+                  refreshHistory()
+                  executor.execute {
+                      var ok = false
+                      var err = ""
+                      try {
+                          val ins = contentResolver.openInputStream(uri) ?: throw IOException("无法打开文件")
+                          val sock = btSocket ?: throw IOException("蓝牙未连接")
+                          val out = sock.outputStream
+                          val nameBytes = name.toByteArray(Charsets.UTF_8)
+                          val hdr = ByteArray(1 + nameBytes.size + 1 + 4)
+                          var off = 0
+                          hdr[off] = HEADER; off++
+                          System.arraycopy(nameBytes, 0, hdr, off, nameBytes.size); off += nameBytes.size
+                          hdr[off] = 0; off++
+                          hdr[off] = (fileSize and 0xFF).toByte()
+                          hdr[off + 1] = ((fileSize shr 8) and 0xFF).toByte()
+                          hdr[off + 2] = ((fileSize shr 16) and 0xFF).toByte()
+                          hdr[off + 3] = ((fileSize shr 24) and 0xFF).toByte()
+                          out.write(hdr); out.flush()
+                          val buf = ByteArray(BUF)
+                          var sent = 0L
+                          var n: Int
+                          while (ins.read(buf).also { n = it } != -1) {
+                              if (!connected) throw IOException("蓝牙已断开")
+                              out.write(buf, 0, n); out.flush()
+                              sent += n
+                              val s = sent; val t = fileSize
+                              handler.post { updateProgress(s, t) }
+                          }
+                          ins.close()
+                          val reply = waitReply(sock)
+                          if (reply.startsWith("OK")) { ok = true } else { err = "设备返回: $reply" }
+                      } catch (e: SecurityException) { err = "权限异常: ${e.message}" }
+                      catch (e: IOException) { err = "IO异常: ${e.message}" }
+                      catch (e: Exception) { err = "异常: ${e.message}" }
+                      val fOk = ok; val fErr = err; val fN = name
+                      handler.post { onTransferDone(fOk, fErr, fN) }
+                  }
+              }
+              private fun waitReply(socket: BluetoothSocket): String {
+                  val start = System.currentTimeMillis()
+                  val buf = ByteArray(64)
+                  val sb = StringBuilder()
+                  while (System.currentTimeMillis() - start < REPLY_TIMEOUT) {
+                      if (!connected) break
+                      try {
+                          val avail = socket.inputStream.available()
+                          if (avail > 0) {
+                              val n = socke
