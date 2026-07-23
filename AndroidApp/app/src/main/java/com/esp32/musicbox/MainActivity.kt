@@ -704,7 +704,9 @@ class MainActivity : AppCompatActivity() {
                 // 发送播放控制命令后自动查询状态
                 if (cmd.toInt() in 0xC0..0xC4) {
                     SystemClock.sleep(200)
-                    btSocket?.outputStream?.write(byteArrayOf(0xC5))
+                    val statusBuf = ByteArray(1)
+                    statusBuf[0] = (0xC5 and 0xFF).toByte()
+                    btSocket?.outputStream?.write(statusBuf)
                     btSocket?.outputStream?.flush()
                 }
             } catch (e: IOException) {
