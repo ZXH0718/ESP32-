@@ -696,7 +696,7 @@ class MainActivity : AppCompatActivity() {
                 btSocket?.outputStream?.write(byteArrayOf(cmd))
                 btSocket?.outputStream?.flush()
                 // 发送播放控制命令后自动查询状态
-                if (cmd in 0xC0..0xC4) {
+                if (cmd.toInt() in 0xC0..0xC4) {
                     SystemClock.sleep(200)
                     btSocket?.outputStream?.write(byteArrayOf(0xC5))
                     btSocket?.outputStream?.flush()
