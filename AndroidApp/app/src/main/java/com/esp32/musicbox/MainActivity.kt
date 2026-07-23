@@ -735,11 +735,12 @@ class MainActivity : AppCompatActivity() {
         executor.execute {
             try {
                 val ts = System.currentTimeMillis() / 1000L
-                val buf = byteArrayOf(0xD0.toByte(),
-                    ((ts shr 24) and 0xFF).toByte(),
-                    ((ts shr 16) and 0xFF).toByte(),
-                    ((ts shr 8) and 0xFF).toByte(),
-                    (ts and 0xFF).toByte())
+                val buf = ByteArray(5)
+                buf[0] = (0xD0 and 0xFF).toByte()
+                buf[1] = ((ts ushr 24) and 0xFF).toByte()
+                buf[2] = ((ts ushr 16) and 0xFF).toByte()
+                buf[3] = ((ts ushr 8) and 0xFF).toByte()
+                buf[4] = (ts and 0xFF).toByte()
                 btSocket?.outputStream?.write(buf)
                 btSocket?.outputStream?.flush()
                 handler.post { snack("时间同步指令已发送") }
