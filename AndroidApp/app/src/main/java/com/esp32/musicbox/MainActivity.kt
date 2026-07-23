@@ -76,6 +76,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var btnNext: com.google.android.material.button.MaterialButton
     private lateinit var btnVolUp: com.google.android.material.button.MaterialButton
     private lateinit var btnVolDown: com.google.android.material.button.MaterialButton
+    private lateinit var btnSyncTime: com.google.android.material.button.MaterialButton
 
     private val executor = Executors.newSingleThreadExecutor()
     private val handler = Handler(Looper.getMainLooper())
@@ -139,6 +140,8 @@ class MainActivity : AppCompatActivity() {
                   btnNext = findViewById(R.id.btn_next)
                   btnVolUp = findViewById(R.id.btn_vol_up)
                   btnVolDown = findViewById(R.id.btn_vol_down)
+                  btnSyncTime = findViewById(R.id.btn_sync_time)
+                  btnSyncTime.setOnClickListener { syncTime() }
                   btnPlayPause.setOnClickListener { sendBtCommand(0xC0.toByte()) }
                   btnPrev.setOnClickListener { sendBtCommand(0xC1.toByte()) }
                   btnNext.setOnClickListener { sendBtCommand(0xC2.toByte()) }
@@ -385,8 +388,9 @@ class MainActivity : AppCompatActivity() {
             tvNoDevices.visibility = View.GONE
             updateSendBtn()
                     cardRemote.visibility = View.VISIBLE
+                    btnSyncTime.visibility = View.VISIBLE
                     tvRemoteVolume.visibility = View.VISIBLE
-            snack("已连接到 ${device.name}")
+                    snack("已连接到 ${device.name}")
         }
         startReceive(socket)
     }
@@ -438,6 +442,7 @@ class MainActivity : AppCompatActivity() {
         btnDisconnect.visibility = View.GONE
         btnScan.visibility = View.VISIBLE
         cardRemote.visibility = View.GONE
+        btnSyncTime.visibility = View.GONE
         tvRemoteVolume.visibility = View.GONE
         tvRemoteStatus.text = getString(R.string.remote_status)
         updateSendBtn()
@@ -462,6 +467,7 @@ class MainActivity : AppCompatActivity() {
             tvProgress.visibility = View.GONE
             updateSendingRecord(false, "连接已断开")
             cardRemote.visibility = View.GONE
+            btnSyncTime.visibility = View.GONE
             tvRemoteVolume.visibility = View.GONE
             snack(getString(R.string.conn_lost))
         }
@@ -722,6 +728,25 @@ class MainActivity : AppCompatActivity() {
             tvRemoteVolume.text = getString(R.string.remote_volume, vol)
             tvRemoteVolume.visibility = View.VISIBLE
         } catch (_: Exception) {}
+    }
+
+    private fun syncTime() {
+        if (!connected || transferring) return
+        executor.execute {
+            try {
+                val ts = System.currentTimeMillis() / 1000L
+                val buf = byteArrayOf(0xD0.toByte(),
+                    ((ts shr 24) and 0xFF).toByte(),
+                    ((ts shr 16) and 0xFF).toByte(),
+                    ((ts shr 8) and 0xFF).toByte(),
+                    (ts and 0xFF).toByte())
+                btSocket?.outputStream?.write(buf)
+                btSocket?.outputStream?.flush()
+                handler.post { snack("时间同步指令已发送") }
+            } catch (e: IOException) {
+                handler.post { handleLost() }
+            }
+        }
     }
 
     // ==================== 广播 ====================

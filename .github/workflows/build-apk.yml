@@ -190,6 +190,7 @@ jobs:
               private lateinit var btnNext: com.google.android.material.button.MaterialButton
               private lateinit var btnVolUp: com.google.android.material.button.MaterialButton
               private lateinit var btnVolDown: com.google.android.material.button.MaterialButton
+              private lateinit var btnSyncTime: com.google.android.material.button.MaterialButton
               private val executor = Executors.newSingleThreadExecutor()
               private val handler = Handler(Looper.getMainLooper())
               private lateinit var permLauncher: ActivityResultLauncher<Array<String>>
@@ -244,6 +245,8 @@ jobs:
                   btnNext = findViewById(R.id.btn_next)
                   btnVolUp = findViewById(R.id.btn_vol_up)
                   btnVolDown = findViewById(R.id.btn_vol_down)
+                  btnSyncTime = findViewById(R.id.btn_sync_time)
+                  btnSyncTime.setOnClickListener { syncTime() }
                   btnPlayPause.setOnClickListener { sendBtCommand(0xC0.toByte()) }
                   btnPrev.setOnClickListener { sendBtCommand(0xC1.toByte()) }
                   btnNext.setOnClickListener { sendBtCommand(0xC2.toByte()) }
@@ -419,6 +422,7 @@ jobs:
                       tvNoDevices.visibility = View.GONE
                       updateSendBtn()
                       cardRemote.visibility = View.VISIBLE
+                      btnSyncTime.visibility = View.VISIBLE
                       tvRemoteVolume.visibility = View.VISIBLE
                       snack("已连接到 ${device.name}")
                   }
@@ -466,6 +470,7 @@ jobs:
                   btnDisconnect.visibility = View.GONE
                   btnScan.visibility = View.VISIBLE
                   cardRemote.visibility = View.GONE
+                  btnSyncTime.visibility = View.GONE
                   tvRemoteVolume.visibility = View.GONE
                   tvRemoteStatus.text = getString(R.string.remote_status)
                   updateSendBtn()
@@ -483,6 +488,7 @@ jobs:
                       progressBar.visibility = View.GONE
                       tvProgress.visibility = View.GONE
                       cardRemote.visibility = View.GONE
+                      btnSyncTime.visibility = View.GONE
                       tvRemoteVolume.visibility = View.GONE
                       updateSendingRecord(false, "连接已断开")
                       snack(getString(R.string.conn_lost))
@@ -689,6 +695,24 @@ jobs:
                       tvRemoteVolume.text = getString(R.string.remote_volume, vol)
                       tvRemoteVolume.visibility = View.VISIBLE
                   } catch (_: Exception) {}
+              }
+              private fun syncTime() {
+                  if (!connected || transferring) return
+                  executor.execute {
+                      try {
+                          val ts = System.currentTimeMillis() / 1000L
+                          val buf = byteArrayOf(0xD0.toByte(),
+                              ((ts shr 24) and 0xFF).toByte(),
+                              ((ts shr 16) and 0xFF).toByte(),
+                              ((ts shr 8) and 0xFF).toByte(),
+                              (ts and 0xFF).toByte())
+                          btSocket?.outputStream?.write(buf)
+                          btSocket?.outputStream?.flush()
+                          handler.post { snack("时间同步指令已发送") }
+                      } catch (e: IOException) {
+                          handler.post { handleLost() }
+                      }
+                  }
               }
               private val btReceiver = object : BroadcastReceiver() {
                   override fun onReceive(ctx: Context?, intent: Intent?) {
@@ -1032,6 +1056,19 @@ jobs:
                                   android:text="@string/btn_vol_up"
                                   android:textSize="16sp" />
                           </LinearLayout>
+                          <LinearLayout
+                              android:layout_width="match_parent"
+                              android:layout_height="wrap_content"
+                              android:layout_marginTop="8dp"
+                              android:gravity="center"
+                              android:orientation="horizontal">
+                              <com.google.android.material.button.MaterialButton
+                                  android:id="@+id/btn_sync_time"
+                                  style="@style/Widget.Material3.Button.OutlinedButton"
+                                  android:layout_width="wrap_content"
+                                  android:layout_height="wrap_content"
+                                  android:text="@string/btn_sync_time" />
+                          </LinearLayout>
                       </LinearLayout>
                   </com.google.android.material.card.MaterialCardView>
 
@@ -1082,6 +1119,7 @@ jobs:
               <string name="remote_paused">已暂停: %1$s</string>
               <string name="remote_volume">音量: %1$d/21</string>
               <string name="remote_song_info">歌曲 %1$d/%2$d</string>
+              <string name="btn_sync_time">同步时间</string>
           </resources>
           ENDFILE
 

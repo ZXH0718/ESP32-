@@ -46,4 +46,5 @@
     <string name="remote_paused">已暂停: %1$s</string>
     <string name="remote_volume">音量: %1$d/21</string>
     <string name="remote_song_info">歌曲 %1$d/%2$d</string>
+    <string name="btn_sync_time">同步时间</string>
 </resources>
