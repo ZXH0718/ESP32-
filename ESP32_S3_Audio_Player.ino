@@ -83,6 +83,12 @@
   ESP32 -> 手机:
     0xC0-0xC4 命令执行后回复 "OK\n"
     0xC5 回复 JSON 状态字符串 + "\n"
+
+  ========== 蓝牙时间同步协议 ==========
+  手机 -> ESP32:
+    [0xD0] [Unix时间戳 4字节大端序]
+  ESP32 -> 手机:
+    设置成功回复 "OK\n"
 */
 
 #include <Arduino.h>
@@ -138,6 +144,14 @@ uint32_t btReceived = 0;
 uint8_t btSizeBuf[4];
 int btSizeIdx = 0;
 bool btConnected = false;
+
+// ===================== 时间同步 =====================
+unsigned long syncedTime = 0;  // 同步后的 Unix 时间戳（秒）
+unsigned long syncMillis = 0; // 同步时的 millis()
+bool timeSynced = false;      // 是否已同步时间
+uint8_t btTimeBuf[4];
+int btTimeBufIdx = 0;
+bool btRecvTime = false;
 
 // ===================== UI 参数 =====================
 #define BG_COLOR        TFT_BLACK
@@ -267,7 +281,7 @@ void handleBtCommand(uint8_t cmd) {
       {
         String song = "";
         if (playingIndex >= 0 && playingIndex < fileCount) {
-          song = fileList[playingIndex];
+          song = removeExtension(fileList[playingIndex]);
         }
         String json = "{\"playing\":";
         json += isPlaying ? "true" : "false";
@@ -309,6 +323,27 @@ void handleBluetooth() {
         // 蓝牙遥控命令（0xC0-0xC5）
         if (b >= 0xC0 && b <= 0xC5) {
           handleBtCommand(b);
+        }
+        // 时间同步命令 0xD0
+        else if (b == (uint8_t)0xD0) {
+          btRecvTime = true;
+          btTimeBufIdx = 0;
+        }
+        // 如果正在接收时间戳数据
+        else if (btRecvTime) {
+          btTimeBuf[btTimeBufIdx++] = b;
+          if (btTimeBufIdx >= 4) {
+            uint32_t ts = ((uint32_t)btTimeBuf[0] << 24) | ((uint32_t)btTimeBuf[1] << 16) |
+                         ((uint32_t)btTimeBuf[2] << 8) | btTimeBuf[3];
+            syncedTime = ts;
+            syncMillis = millis();
+            timeSynced = true;
+            btRecvTime = false;
+            Serial.printf("[BT] 时间已同步: %u\n", ts);
+            SerialBT.write("OK\n");
+            // 立即刷新时钟显示
+            if (screen == LIST) drawListScreen();
+          }
         }
         // 等待起始标记 0xAB
         else if (b == 0xAB) {
@@ -398,6 +433,12 @@ void handleBluetooth() {
         break;
     }
   }
+}
+
+// ===================== 时间同步辅助 =====================
+unsigned long getCurrentTime() {
+  if (!timeSynced) return 0;
+  return syncedTime + ((millis() - syncMillis) / 1000UL);
 }
 
 // ===================== 蓝牙传输界面 =====================
@@ -629,6 +670,13 @@ void scanAudioFiles() {
   }
 }
 
+// ===================== UI 辅助 =====================
+String removeExtension(const String& filename) {
+  int dot = filename.lastIndexOf('.');
+  if (dot > 0) return filename.substring(0, dot);
+  return filename;
+}
+
 // ===================== UI 绘制 =====================
 void showMessage(const char* msg) {
   tft.fillScreen(BG_COLOR);
@@ -670,6 +718,16 @@ void drawListScreen() {
   tft.setTextColor(btConnected ? BT_COLOR : TFT_DARKGREY, TFT_DARKGREY);
   tft.setCursor(4, 14);
   tft.print(btConnected ? "BT" : "");
+
+  // 时钟显示
+  if (timeSynced) {
+    unsigned long t = getCurrentTime();
+    unsigned int h = (t % 86400UL) / 3600UL;
+    unsigned int m = (t % 3600UL) / 60UL;
+    unsigned int s = t % 60UL;
+    tft.setCursor(SCREEN_W - 54, 4);
+    tft.printf("%02d:%02d", h, m);
+  }
 
   tft.setTextSize(1);
   for (int i = 0; i < VISIBLE_ROWS; i++) {
@@ -726,7 +784,7 @@ void drawPlayScreen() {
   tft.setTextColor(TEXT_COLOR, BG_COLOR);
   tft.setTextSize(2);
   tft.setTextDatum(TC_DATUM);
-  String name = fileList[playingIndex];
+  String name = removeExtension(fileList[playingIndex]);
   if (name.length() > 18) name = name.substring(0, 15) + "...";
   tft.drawString(name.c_str(), SCREEN_W / 2, 42);
 
