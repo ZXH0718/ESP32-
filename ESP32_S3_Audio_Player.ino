@@ -1,22 +1,22 @@
 /*
   ESP32-S3 按键式带屏幕音频播放器 (蓝牙版)
-  硬件: 嘉顺 ESP32-S3 N16R8 + 1.54" ST7789 IPS 240x240 + MAX98357A + Mini SD卡模块 + 5按键
+  硬件: 嘉顺 ESP32-S3 N16R8 + 2.4" ST7789 TFT 240x320 + MAX98357A + Mini SD卡模块 + 5按键
   支持格式: MP3, WAV, FLAC, AAC, OGG
   功能: 按键浏览文件、播放/暂停、上一首/下一首、音量调节、进度显示
         蓝牙接收文件（通过手机APP传输音乐到SD卡）
 
   ========== 接线表 ==========
-  ESP32-S3      1.54" ST7789     MAX98357A     Mini SD模块     按键(5个)
+  ESP32-S3      2.4" ST7789     MAX98357A     Mini SD模块     按键(5个)
   --------      -------------    ----------    -------------   ----------
   3.3V    -->   VCC              VIN           VCC              -
   GND     -->   GND              GND           GND              另一端全接GND
   GPIO11  -->   SDA (MOSI)
   GPIO12  -->   SCL (SCK)
+  GPIO13  -->   SDO (MISO)       -             MISO (共用)
   GPIO10  -->   CS
-  GPIO9   -->   DC
+  GPIO9   -->   DC (RS)
   GPIO8   -->   RES (RST)
-  3.3V    -->   BLK (背光,常亮)
-  GPIO13  -->   -                -             MISO
+  3.3V    -->   LED (背光,常亮)
   GPIO14  -->   -                -             CS
   GPIO4   -->   -                BCLK
   GPIO5   -->   -                LRCLK (LRC)
@@ -39,10 +39,10 @@
   ========== TFT_eSPI 配置 ==========
   修改 库目录 TFT_eSPI/User_Setup.h，用以下内容替换:
 
-    #define USER_SETUP_INFO "ESP32-S3 ST7789 240x240"
+    #define USER_SETUP_INFO "ESP32-S3 ST7789 240x320"
     #define ST7789_DRIVER
     #define TFT_WIDTH  240
-    #define TFT_HEIGHT 240
+    #define TFT_HEIGHT 320
 
     #define TFT_MOSI 11
     #define TFT_SCLK 12
@@ -163,11 +163,11 @@ bool btRecvTime = false;
 #define BT_COLOR        TFT_ORANGE
 
 #define SCREEN_W        240
-#define SCREEN_H        240
-#define ROW_HEIGHT      22
-#define HEADER_H        34
+#define SCREEN_H        320
+#define ROW_HEIGHT      24
+#define HEADER_H        36
 #define FOOTER_H        18
-#define VISIBLE_ROWS    8
+#define VISIBLE_ROWS    11
 
 // ===================== 蓝牙回调 =====================
 void btCallback(esp_spp_cb_event_t event, esp_spp_cb_param_t *param) {
@@ -448,10 +448,10 @@ void drawBtTransferScreen() {
   tft.setTextColor(BT_COLOR, BG_COLOR);
   tft.setTextSize(2);
   tft.setTextDatum(TC_DATUM);
-  tft.drawString("BT Receiving", SCREEN_W / 2, 10);
+  tft.drawString("BT Receiving", SCREEN_W / 2, 12);
 
   // 分隔线
-  tft.drawFastHLine(10, 32, SCREEN_W - 20, TFT_DARKGREY);
+  tft.drawFastHLine(10, 36, SCREEN_W - 20, TFT_DARKGREY);
 
   // 文件名
   tft.setTextColor(TEXT_COLOR, BG_COLOR);
@@ -459,13 +459,13 @@ void drawBtTransferScreen() {
   tft.setTextDatum(TC_DATUM);
   String name = btFileName;
   if (name.length() > 30) name = name.substring(0, 27) + "...";
-  tft.drawString(name.c_str(), SCREEN_W / 2, 40);
+  tft.drawString(name.c_str(), SCREEN_W / 2, 48);
 
   drawBtProgress();
 }
 
 void drawBtProgress() {
-  int barX = 10, barY = 65, barW = SCREEN_W - 20, barH = 12;
+  int barX = 10, barY = 75, barW = SCREEN_W - 20, barH = 14;
 
   // 进度条
   tft.fillRoundRect(barX, barY, barW, barH, 3, TFT_DARKGREY);
@@ -478,9 +478,9 @@ void drawBtProgress() {
   }
 
   // 百分比
-  tft.fillRect(0, barY + 16, SCREEN_W, 20, BG_COLOR);
+  tft.fillRect(0, barY + 20, SCREEN_W, 24, BG_COLOR);
   tft.setTextColor(TEXT_COLOR, BG_COLOR);
-  tft.setTextSize(2);
+  tft.setTextSize(3);
   tft.setTextDatum(TC_DATUM);
   int pct = 0;
   if (btFileSize > 0) {
@@ -491,13 +491,13 @@ void drawBtProgress() {
   // 已接收 / 总大小
   tft.setTextSize(1);
   tft.setTextColor(TFT_LIGHTGREY, BG_COLOR);
-  tft.drawString(formatSize(btReceived), SCREEN_W / 4, barY + 42);
-  tft.drawString(formatSize(btFileSize), SCREEN_W * 3 / 4, barY + 42);
+  tft.drawString(formatSize(btReceived), SCREEN_W / 4, barY + 55);
+  tft.drawString(formatSize(btFileSize), SCREEN_W * 3 / 4, barY + 55);
 
   // 蓝牙图标
   tft.setTextSize(1);
   tft.setTextColor(btConnected ? BT_COLOR : TFT_DARKGREY, BG_COLOR);
-  tft.drawString(btConnected ? "BT Connected" : "BT Disconnected", SCREEN_W / 2, barY + 60);
+  tft.drawString(btConnected ? "BT Connected" : "BT Disconnected", SCREEN_W / 2, barY + 80);
 
   // 提示
   drawBtFooter();
@@ -507,17 +507,17 @@ void drawBtComplete() {
   tft.fillScreen(BG_COLOR);
 
   tft.setTextColor(PLAYING_COLOR, BG_COLOR);
-  tft.setTextSize(3);
+  tft.setTextSize(4);
   tft.setTextDatum(MC_DATUM);
-  tft.drawString("DONE!", SCREEN_W / 2, SCREEN_H / 2 - 20);
+  tft.drawString("DONE!", SCREEN_W / 2, SCREEN_H / 2 - 30);
 
   tft.setTextColor(TEXT_COLOR, BG_COLOR);
   tft.setTextSize(1);
   tft.drawString(btFileName.c_str(), SCREEN_W / 2, SCREEN_H / 2 + 15);
-  tft.drawString(formatSize(btFileSize), SCREEN_W / 2, SCREEN_H / 2 + 30);
+  tft.drawString(formatSize(btFileSize), SCREEN_W / 2, SCREEN_H / 2 + 35);
 
   tft.setTextColor(TFT_DARKGREY, BG_COLOR);
-  tft.drawString("Returning to list...", SCREEN_W / 2, SCREEN_H / 2 + 55);
+  tft.drawString("Returning to list...", SCREEN_W / 2, SCREEN_H / 2 + 65);
   tft.setTextDatum(TL_DATUM);
 }
 
@@ -720,7 +720,7 @@ void drawListScreen() {
   // 第二行: 蓝牙状态 + 年月日
   tft.setTextSize(1);
   tft.setTextDatum(TL_DATUM);
-  tft.setCursor(4, 18);
+  tft.setCursor(4, 20);
   if (btConnected) {
     tft.setTextColor(BT_COLOR, TFT_DARKGREY);
     tft.print("BT");
@@ -805,32 +805,38 @@ void drawListScreen() {
 void drawPlayScreen() {
   tft.fillScreen(BG_COLOR);
 
+  // 顶部标题
   tft.setTextColor(ACCENT_COLOR, BG_COLOR);
   tft.setTextSize(2);
   tft.setTextDatum(TC_DATUM);
-  tft.drawString(">> Playing <<", SCREEN_W / 2, 8);
+  tft.drawString(">> Playing <<", SCREEN_W / 2, 10);
 
-  tft.drawFastHLine(10, 30, SCREEN_W - 20, TFT_DARKGREY);
+  tft.drawFastHLine(10, 34, SCREEN_W - 20, TFT_DARKGREY);
 
+  // 歌曲名 (多出空间，显示更长名字)
   tft.setTextColor(TEXT_COLOR, BG_COLOR);
   tft.setTextSize(2);
   tft.setTextDatum(TC_DATUM);
   String name = removeExtension(fileList[playingIndex]);
-  if (name.length() > 18) name = name.substring(0, 15) + "...";
-  tft.drawString(name.c_str(), SCREEN_W / 2, 42);
+  if (name.length() > 20) name = name.substring(0, 17) + "...";
+  tft.drawString(name.c_str(), SCREEN_W / 2, 50);
 
-  tft.setTextSize(3);
+  // 播放状态 (加大字号)
+  tft.setTextSize(4);
   tft.setTextColor(isPaused ? TFT_YELLOW : PLAYING_COLOR, BG_COLOR);
-  tft.drawString(isPaused ? "|| PAUSE" : "> PLAY", SCREEN_W / 2, 72);
+  tft.drawString(isPaused ? "|| PAUSE" : "> PLAY", SCREEN_W / 2, 85);
 
-  tft.drawRoundRect(10, 112, SCREEN_W - 20, 10, 3, TFT_DARKGREY);
+  // 进度条
+  tft.drawRoundRect(10, 135, SCREEN_W - 20, 10, 3, TFT_DARKGREY);
 
-  tft.fillRect(8, 128, SCREEN_W - 16, 18, BG_COLOR);
+  // 时间显示区域
+  tft.fillRect(8, 150, SCREEN_W - 16, 18, BG_COLOR);
 
+  // 音量信息
   tft.setTextSize(1);
   tft.setTextColor(TEXT_COLOR, BG_COLOR);
   tft.setTextDatum(TL_DATUM);
-  tft.setCursor(10, 155);
+  tft.setCursor(10, 180);
   tft.printf("VOL: %d/21", volume);
 
   drawVolumeBar();
@@ -839,19 +845,19 @@ void drawPlayScreen() {
 }
 
 void drawVolumeBar() {
-  int barX = 10, barY = 172, barW = SCREEN_W - 20, barH = 8;
-  tft.fillRoundRect(barX, barY, barW, barH, 2, TFT_DARKGREY);
+  int barX = 10, barY = 198, barW = SCREEN_W - 20, barH = 10;
+  tft.fillRoundRect(barX, barY, barW, barH, 3, TFT_DARKGREY);
   int fillW = map(volume, 0, 21, 0, barW - 2);
   if (fillW > 0) {
-    tft.fillRoundRect(barX + 1, barY + 1, fillW, barH - 2, 2, PROGRESS_COLOR);
+    tft.fillRoundRect(barX + 1, barY + 1, fillW, barH - 2, 3, PROGRESS_COLOR);
   }
 
   tft.setTextSize(1);
   tft.setTextColor(TFT_DARKGREY, BG_COLOR);
   tft.setTextDatum(TL_DATUM);
-  tft.drawString("0", barX, barY + 12);
+  tft.drawString("0", barX, barY + 14);
   tft.setTextDatum(TR_DATUM);
-  tft.drawString("21", barX + barW, barY + 12);
+  tft.drawString("21", barX + barW, barY + 14);
   tft.setTextDatum(TL_DATUM);
 }
 
@@ -866,18 +872,18 @@ void updateProgress() {
   if (total > 0) {
     int progress = map(current, 0, total, 0, SCREEN_W - 24);
 
-    tft.fillRoundRect(12, 114, SCREEN_W - 24, 6, 2, BG_COLOR);
+    tft.fillRoundRect(12, 137, SCREEN_W - 24, 6, 2, BG_COLOR);
     if (progress > 0) {
-      tft.fillRoundRect(12, 114, progress, 6, 2, PROGRESS_COLOR);
+      tft.fillRoundRect(12, 137, progress, 6, 2, PROGRESS_COLOR);
     }
 
-    tft.fillRect(8, 128, SCREEN_W - 16, 18, BG_COLOR);
+    tft.fillRect(8, 150, SCREEN_W - 16, 18, BG_COLOR);
     tft.setTextColor(TFT_LIGHTGREY, BG_COLOR);
     tft.setTextSize(1);
     tft.setTextDatum(TL_DATUM);
-    tft.drawString(formatTime(current), 10, 130);
+    tft.drawString(formatTime(current), 10, 152);
     tft.setTextDatum(TR_DATUM);
-    tft.drawString(formatTime(total), SCREEN_W - 10, 130);
+    tft.drawString(formatTime(total), SCREEN_W - 10, 152);
     tft.setTextDatum(TL_DATUM);
   }
 
