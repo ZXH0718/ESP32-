@@ -1,57 +1,56 @@
 /*
-  ESP32-S3 按键式带屏幕音频播放器 (蓝牙版)
-  硬件: 嘉顺 ESP32-S3 N16R8 + 1.54" ST7789 IPS 240x240 + MAX98357A + Mini SD卡模块 + 5按键
+  ESP32-S3 触摸屏音频播放器 (BLE蓝牙版)
+  硬件: ESP32-S3 N16R8 + 2.4" ST7789 TFT 240x320 (带XPT2046触摸) + MAX98357A + Mini SD卡模块
   支持格式: MP3, WAV, FLAC, AAC, OGG
-  功能: 按键浏览文件、播放/暂停、上一首/下一首、音量调节、进度显示
-        蓝牙接收文件（通过手机APP传输音乐到SD卡）
+  功能: 触摸浏览文件、播放/暂停、上一首/下一首、音量调节、进度显示
+        BLE蓝牙接收文件（通过手机APP传输音乐到SD卡）
+        BLE蓝牙遥控、时间同步
 
   ========== 接线表 ==========
-  ESP32-S3      1.54" ST7789     MAX98357A     Mini SD模块     按键(5个)
-  --------      -------------    ----------    -------------   ----------
-  3.3V    -->   VCC              VIN           VCC              -
-  GND     -->   GND              GND           GND              另一端全接GND
-  GPIO11  -->   SDA (MOSI)
-  GPIO12  -->   SCL (SCK)
+  ESP32-S3      2.4" TFT(屏幕)   MAX98357A     Mini SD模块
+  --------      --------------    ----------    -------------
+  3V3     -->   VCC + LED         VIN           VCC (3V3)
+  GND     -->   GND               GND           GND
+  GPIO11  -->   SDI (MOSI)
+  GPIO12  -->   SCK
+  GPIO13  -->   SDO (MISO)
   GPIO10  -->   CS
-  GPIO9   -->   DC
-  GPIO8   -->   RES (RST)
-  3.3V    -->   BLK (背光,常亮)
-  GPIO13  -->   -                -             MISO
-  GPIO14  -->   -                -             CS
-  GPIO4   -->   -                BCLK
-  GPIO5   -->   -                LRCLK (LRC)
-  GPIO6   -->   -                DIN
-  GPIO15  -->   -                -             -                上键
-  GPIO16  -->   -                -             -                下键
-  GPIO17  -->   -                -             -                确认键
-  GPIO18  -->   -                -             -                返回键
-  GPIO21  -->   -                -             -                菜单键
+  GPIO9   -->   DC (RS)
+  GPIO8   -->   RESET
+  GPIO7   -->   T_CS (触摸片选)
+  GPIO6   -->   T_CLK (触摸时钟)
+  GPIO5   -->   T_DIN (触摸输入)
+  GPIO4   -->   T_DO (触摸输出)
+  GPIO14  -->   -                  -             CS
+  GPIO15  -->   -                  BCLK
+  GPIO16  -->   -                  LRC
+  GPIO17  -->   -                  DIN
 
   喇叭(28mm 4Ω3W) --> 接 MAX98357A 绿色端子 SPK+/SPK-
+  注意: T_IRQ 引脚不接
 
   ========== 开发环境 ==========
   Arduino IDE -> 开发板选 "ESP32S3 Dev Module"
-  依赖库: TFT_eSPI (by Bodmer), ESP32-audioI2S (by schreibfaul1)
-  蓝牙: 使用内置 BluetoothSerial 库（无需额外安装）
+  依赖库: TFT_eSPI (by Bodmer), ESP32-audioI2S (by schreibfaul1), XPT2046_Touchscreen (by Paul Stoffregen)
+  BLE: 使用内置 BLEDevice 库（ESP32-S3自带，无需额外安装）
   重要: 工具 -> Partition Scheme -> 选 "Huge APP (3MB No OTA/1MB SPIFFS)"
         工具 -> PSRAM -> 选 "OPI PSRAM 8MB"
 
   ========== TFT_eSPI 配置 ==========
   修改 库目录 TFT_eSPI/User_Setup.h，用以下内容替换:
 
-    #define USER_SETUP_INFO "ESP32-S3 ST7789 240x240"
+    #define USER_SETUP_INFO "ESP32-S3 ST7789 240x320"
     #define ST7789_DRIVER
     #define TFT_WIDTH  240
-    #define TFT_HEIGHT 240
-
+    #define TFT_HEIGHT 320
     #define TFT_MOSI 11
     #define TFT_SCLK 12
     #define TFT_CS   10
     #define TFT_DC    9
     #define TFT_RST   8
-
+    #define USE_HSPI_PORT
+    #define TFT_SPI_MODE SPI_MODE0
     // #define TFT_RGB_ORDER TFT_BGR
-
     #define LOAD_GLCD
     #define LOAD_FONT2
     #define LOAD_FONT4
@@ -60,62 +59,76 @@
     #define LOAD_FONT8
     #define LOAD_GFXFF
     #define SMOOTH_FONT
+    #define SPI_FREQUENCY  20000000
 
-    #define SPI_FREQUENCY  40000000
-
-  ========== 蓝牙文件传输协议 ==========
-  手机 -> ESP32:
+  ========== BLE 文件传输协议 ==========
+  使用 BLE GATT 透传服务，手机写入数据到 RX 特征值
+  手机 -> ESP32 (通过BLE写入):
     [0xAB] [文件名 UTF-8] [0x00] [文件大小 4字节小端] [文件数据 N字节]
+  ESP32 -> 手机 (通过BLE通知):
+    收到完整文件后发送 "OK\n"，接收出错发送 "ERR\n"
 
-  ESP32 -> 手机:
-    收到完整文件后发送 "OK\n"
-    接收出错发送 "ERR\n"
+  ========== BLE 遥控命令协议 ==========
+    0xC0 → 播放/暂停
+    0xC1 → 上一首
+    0xC2 → 下一首
+    0xC3 → 音量+
+    0xC4 → 音量-
+    0xC5 → 获取状态 (回复 JSON)
 
-  ========== 蓝牙遥控命令协议 ==========
-  在 BT_IDLE 状态下（无文件传输时），手机发送单字节命令:
-    0xC0 → 播放/暂停（togglePause，未播放则播放 currentIndex 指向歌曲）
-    0xC1 → 上一首（playPrevious）
-    0xC2 → 下一首（playNext）
-    0xC3 → 音量+（最大21）
-    0xC4 → 音量-（最小0）
-    0xC5 → 获取状态（回复 JSON: {"playing":bool,"paused":bool,"vol":int,"song":"name","index":int,"total":int}）
-
-  ESP32 -> 手机:
-    0xC0-0xC4 命令执行后回复 "OK\n"
-    0xC5 回复 JSON 状态字符串 + "\n"
-
-  ========== 蓝牙时间同步协议 ==========
-  手机 -> ESP32:
+  ========== BLE 时间同步协议 ==========
     [0xD0] [Unix时间戳 4字节大端序]
-  ESP32 -> 手机:
-    设置成功回复 "OK\n"
 */
 
 #include <Arduino.h>
 #include <SPI.h>
-#include <SD.h>
+#include "SD.h"
 #include <TFT_eSPI.h>
 #include <Audio.h>
-#include "BluetoothSerial.h"
+#include <XPT2046_Touchscreen.h>
+
+// ===================== BLE 蓝牙配置 =====================
+#include <BLEDevice.h>
+#include <BLEServer.h>
+#include <BLEUtils.h>
+#include <BLE2902.h>
+
+// BLE 服务和特征值 UUID
+// 使用 Nordic UART Service 的标准 UUID，兼容大多数 BLE 串口APP
+#define BLE_SERVICE_UUID           "6e400001-b5a3-f393-e0a9-e50e24dcca9e"
+#define BLE_CHARACTERISTIC_RX_UUID "6e400002-b5a3-f393-e0a9-e50e24dcca9e"  // 手机写入
+#define BLE_CHARACTERISTIC_TX_UUID "6e400003-b5a3-f393-e0a9-e50e24dcca9e"  // ESP32通知
+
+BLEServer *pServer = NULL;
+BLECharacteristic *pTxCharacteristic = NULL;
+BLECharacteristic *pRxCharacteristic = NULL;
+bool deviceConnected = false;
+bool oldDeviceConnected = false;
 
 // ===================== 引脚定义 =====================
-#define I2S_DOUT      6
-#define I2S_BCLK      4
-#define I2S_LRC       5
+#define I2S_DOUT      17
+#define I2S_BCLK      15
+#define I2S_LRC        16
 
 #define SD_MISO       13
 #define SD_CS         14
 
-#define BTN_UP        15
-#define BTN_DOWN      16
-#define BTN_OK        17
-#define BTN_BACK      18
-#define BTN_MENU      21
+// 触摸引脚 (XPT2046)
+#define XPT2046_CS    7
+#define XPT2046_IRQ   -1  // 不使用中断
+
+// 触摸使用独立的 SPI 引脚
+#define TOUCH_SCLK    6
+#define TOUCH_MOSI    5
+#define TOUCH_MISO    4
 
 // ===================== 全局对象 =====================
 TFT_eSPI tft = TFT_eSPI();
 Audio audio;
-BluetoothSerial SerialBT;
+
+// 触摸使用独立 SPI
+SPIClass touchSPI = SPIClass(FSPI);
+XPT2046_Touchscreen ts(XPT2046_CS, XPT2046_IRQ);
 
 String fileList[60];
 int fileCount = 0;
@@ -130,25 +143,24 @@ int volume = 12;
 enum ScreenMode { LIST, PLAYING, BT_TRANSFER };
 ScreenMode screen = LIST;
 
-unsigned long lastBtnTime = 0;
-const unsigned long DEBOUNCE_MS = 200;
+unsigned long lastTouchTime = 0;
+const unsigned long TOUCH_DEBOUNCE = 250;
 
-// ===================== 蓝牙接收状态机 =====================
+// ===================== BLE 接收状态机 =====================
 enum BtState { BT_IDLE, BT_RECV_NAME, BT_RECV_SIZE, BT_RECV_DATA };
 BtState btState = BT_IDLE;
 
-File btFile;            // 当前接收的文件
-String btFileName = ""; // 接收中的文件名
+File btFile;
+String btFileName = "";
 uint32_t btFileSize = 0;
 uint32_t btReceived = 0;
 uint8_t btSizeBuf[4];
 int btSizeIdx = 0;
-bool btConnected = false;
 
 // ===================== 时间同步 =====================
-unsigned long syncedTime = 0;  // 同步后的 Unix 时间戳（秒）
-unsigned long syncMillis = 0; // 同步时的 millis()
-bool timeSynced = false;      // 是否已同步时间
+unsigned long syncedTime = 0;
+unsigned long syncMillis = 0;
+bool timeSynced = false;
 uint8_t btTimeBuf[4];
 int btTimeBufIdx = 0;
 bool btRecvTime = false;
@@ -161,123 +173,256 @@ bool btRecvTime = false;
 #define PROGRESS_COLOR  TFT_CYAN
 #define ACCENT_COLOR    TFT_MAGENTA
 #define BT_COLOR        TFT_ORANGE
+#define BTN_COLOR       TFT_DARKGREY
+#define BTN_ACTIVE      TFT_BLUE
 
 #define SCREEN_W        240
-#define SCREEN_H        240
-#define ROW_HEIGHT      22
-#define HEADER_H        34
-#define FOOTER_H        18
-#define VISIBLE_ROWS    8
+#define SCREEN_H        320
+#define ROW_HEIGHT      24
+#define HEADER_H        36
+#define FOOTER_H        28
+#define VISIBLE_ROWS    10
+#define LIST_AREA_Y     HEADER_H
+#define LIST_AREA_H     (SCREEN_H - HEADER_H - FOOTER_H)
+#define LIST_AREA_X     0
+#define LIST_AREA_W     SCREEN_W
 
-// ===================== 蓝牙回调 =====================
-void btCallback(esp_spp_cb_event_t event, esp_spp_cb_param_t *param) {
-  if (event == ESP_SPP_SRV_OPEN_EVT) {
-    btConnected = true;
-    Serial.println("[BT] 手机已连接");
-  } else if (event == ESP_SPP_CLOSE_EVT) {
-    btConnected = false;
-    Serial.println("[BT] 手机断开");
-    // 断开时清理未完成的接收
-    if (btState != BT_IDLE && btFile) {
-      btFile.close();
-      btState = BT_IDLE;
+// 触摸按钮区域定义 (播放界面)
+#define PLAY_BTN_Y     220
+#define BTN_SIZE        50
+#define BTN_GAP         10
+#define BTN_PREV_X      30
+#define BTN_VOL_DOWN_X  80
+#define BTN_PLAY_X      120
+#define BTN_VOL_UP_X    160
+#define BTN_NEXT_X      210
+#define BTN_BACK_X      120
+
+// ===================== BLE 发送数据缓冲 =====================
+// BLE 通知每次最多发 20 字节，需要分批发送
+String bleTxBuffer = "";
+bool bleTxPending = false;
+
+// ===================== BLE 服务器回调 =====================
+class MyServerCallbacks: public BLEServerCallbacks {
+    void onConnect(BLEServer* pServer) {
+      deviceConnected = true;
+      Serial.println("[BLE] 手机已连接");
+      if (screen == LIST) drawListScreen();
     }
+
+    void onDisconnect(BLEServer* pServer) {
+      deviceConnected = false;
+      Serial.println("[BLE] 手机断开");
+      if (btState != BT_IDLE && btFile) {
+        btFile.close();
+        btState = BT_IDLE;
+      }
+      // 重新开始广播
+      BLEDevice::startAdvertising();
+      if (screen == LIST) drawListScreen();
+    }
+};
+
+// ===================== BLE 接收回调 =====================
+class MyRxCallbacks: public BLECharacteristicCallbacks {
+    void onWrite(BLECharacteristic *pCharacteristic) {
+      std::string rxValue = pCharacteristic->getValue();
+      int len = rxValue.length();
+      if (len <= 0) return;
+
+      // 将收到的数据放入状态机处理
+      for (int i = 0; i < len; i++) {
+        uint8_t b = (uint8_t)rxValue[i];
+        processBtByte(b);
+      }
+    }
+};
+
+// ===================== 前向声明 =====================
+void processBtByte(uint8_t b);
+void handleBtCommand(uint8_t cmd);
+void bleSendData(const char* data);
+void bleSendData(const String& data);
+void drawListScreen();
+void drawPlayScreen();
+void drawBtTransferScreen();
+void drawBtProgress();
+void drawBtComplete();
+void drawBtFooter();
+void drawVolumeBar();
+void showMessage(const char* msg);
+void scanAudioFiles();
+String removeExtension(const String& filename);
+String formatSize(uint32_t bytes);
+void playFile(int index);
+void playNext();
+void playPrevious();
+void togglePause();
+unsigned long getCurrentTime();
+
+// ===================== BLE 发送函数 =====================
+void bleSendData(const char* data) {
+  if (!deviceConnected) return;
+  int len = strlen(data);
+  int offset = 0;
+  while (offset < len) {
+    int chunk = min(len - offset, 20);
+    pTxCharacteristic->setValue((uint8_t*)(data + offset), chunk);
+    pTxCharacteristic->notify();
+    offset += chunk;
+    delay(10);  // BLE通知需要间隔
   }
 }
 
-// ===================== 初始化 =====================
-void setup() {
-  Serial.begin(115200);
-  delay(500);
-
-  pinMode(BTN_UP,   INPUT_PULLUP);
-  pinMode(BTN_DOWN, INPUT_PULLUP);
-  pinMode(BTN_OK,   INPUT_PULLUP);
-  pinMode(BTN_BACK, INPUT_PULLUP);
-  pinMode(BTN_MENU, INPUT_PULLUP);
-
-  tft.init();
-  tft.setRotation(0);
-  tft.fillScreen(BG_COLOR);
-  tft.setTextColor(TEXT_COLOR, BG_COLOR);
-  tft.setTextSize(2);
-  showMessage("初始化...");
-
-  // SD 卡
-  SPI.begin(12, SD_MISO, 11, SD_CS);
-  if (!SD.begin(SD_CS)) {
-    showMessage("SD卡失败!");
-    while (1) delay(100);
-  }
-  showMessage("SD卡OK");
-  delay(200);
-
-  // 蓝牙初始化
-  SerialBT.begin("ESP32_MusicBox");
-  SerialBT.register_callback(btCallback);
-  Serial.println("[BT] 蓝牙已启动，设备名: ESP32_MusicBox");
-  delay(200);
-
-  scanAudioFiles();
-
-  audio.setPinout(I2S_BCLK, I2S_LRC, I2S_DOUT);
-  audio.setVolume(volume);
-
-  drawListScreen();
+void bleSendData(const String& data) {
+  bleSendData(data.c_str());
 }
 
-// ===================== 主循环 =====================
-void loop() {
-  audio.loop();
-  handleButtons();
-  handleBluetooth();
-  if (screen == PLAYING && isPlaying && !isPaused) {
-    updateProgress();
+// ===================== BLE 数据处理 =====================
+void processBtByte(uint8_t b) {
+  switch (btState) {
+    case BT_IDLE:
+      if (b >= 0xC0 && b <= 0xC5) {
+        handleBtCommand(b);
+      }
+      else if (b == (uint8_t)0xD0) {
+        btRecvTime = true;
+        btTimeBufIdx = 0;
+      }
+      else if (btRecvTime) {
+        btTimeBuf[btTimeBufIdx++] = b;
+        if (btTimeBufIdx >= 4) {
+          uint32_t ts = ((uint32_t)btTimeBuf[0] << 24) | ((uint32_t)btTimeBuf[1] << 16) |
+                       ((uint32_t)btTimeBuf[2] << 8) | btTimeBuf[3];
+          syncedTime = ts;
+          syncMillis = millis();
+          timeSynced = true;
+          btRecvTime = false;
+          Serial.printf("[BLE] 时间已同步: %u\n", ts);
+          bleSendData("OK\n");
+          if (screen == LIST) drawListScreen();
+        }
+      }
+      else if (b == 0xAB) {
+        btState = BT_RECV_NAME;
+        btFileName = "";
+        btFileSize = 0;
+        btReceived = 0;
+        btSizeIdx = 0;
+      }
+      break;
+
+    case BT_RECV_NAME:
+      if (b == 0x00) {
+        btState = BT_RECV_SIZE;
+        btSizeIdx = 0;
+      } else {
+        btFileName += (char)b;
+      }
+      break;
+
+    case BT_RECV_SIZE:
+      btSizeBuf[btSizeIdx++] = b;
+      if (btSizeIdx >= 4) {
+        btFileSize = btSizeBuf[0] | (btSizeBuf[1] << 8) |
+                     (btSizeBuf[2] << 16) | (btSizeBuf[3] << 24);
+
+        Serial.printf("[BLE] 接收文件: %s (%u 字节)\n", btFileName.c_str(), btFileSize);
+
+        if (btFileName.length() == 0 || btFileSize == 0 || btFileSize > 50 * 1024 * 1024) {
+          Serial.println("[BLE] 无效的文件头");
+          bleSendData("ERR\n");
+          btState = BT_IDLE;
+          break;
+        }
+
+        String path = "/" + btFileName;
+        btFile = SD.open(path.c_str(), FILE_WRITE);
+        if (!btFile) {
+          Serial.printf("[BLE] 无法创建文件: %s\n", path.c_str());
+          bleSendData("ERR\n");
+          btState = BT_IDLE;
+          break;
+        }
+
+        btReceived = 0;
+        btState = BT_RECV_DATA;
+        screen = BT_TRANSFER;
+        drawBtTransferScreen();
+      }
+      break;
+
+    case BT_RECV_DATA:
+      btFile.write(&b, 1);
+      btReceived++;
+
+      if (btReceived % 4096 == 0) {
+        drawBtProgress();
+      }
+
+      if (btReceived >= btFileSize) {
+        btFile.close();
+        Serial.printf("[BLE] 接收完成: %s\n", btFileName.c_str());
+        bleSendData("OK\n");
+
+        scanAudioFiles();
+        btState = BT_IDLE;
+
+        drawBtComplete();
+
+        delay(2000);
+        if (screen == BT_TRANSFER) {
+          screen = LIST;
+          if (currentIndex >= fileCount) currentIndex = 0;
+          drawListScreen();
+        }
+      }
+      break;
   }
 }
 
-// ===================== 蓝牙遥控命令处理 =====================
+// ===================== BLE 遥控命令处理 =====================
 void handleBtCommand(uint8_t cmd) {
   switch (cmd) {
-    case 0xC0: // 播放/暂停
+    case 0xC0:
       if (!isPlaying && !isPaused) {
-        // 当前没有在播放，播放 currentIndex 指向的歌曲
         playFile(currentIndex);
       } else {
         togglePause();
       }
-      SerialBT.write("OK\n");
+      bleSendData("OK\n");
       break;
 
-    case 0xC1: // 上一首
+    case 0xC1:
       playPrevious();
-      SerialBT.write("OK\n");
+      bleSendData("OK\n");
       break;
 
-    case 0xC2: // 下一首
+    case 0xC2:
       playNext();
-      SerialBT.write("OK\n");
+      bleSendData("OK\n");
       break;
 
-    case 0xC3: // 音量+
+    case 0xC3:
       if (volume < 21) {
         volume++;
         audio.setVolume(volume);
         if (screen == PLAYING) drawVolumeBar();
       }
-      SerialBT.write("OK\n");
+      bleSendData("OK\n");
       break;
 
-    case 0xC4: // 音量-
+    case 0xC4:
       if (volume > 0) {
         volume--;
         audio.setVolume(volume);
         if (screen == PLAYING) drawVolumeBar();
       }
-      SerialBT.write("OK\n");
+      bleSendData("OK\n");
       break;
 
-    case 0xC5: // 获取状态
+    case 0xC5:
       {
         String song = "";
         if (playingIndex >= 0 && playingIndex < fileCount) {
@@ -296,7 +441,7 @@ void handleBtCommand(uint8_t cmd) {
         json += ",\"total\":";
         json += String(fileCount);
         json += "}\n";
-        SerialBT.write(json.c_str());
+        bleSendData(json);
       }
       break;
 
@@ -305,294 +450,259 @@ void handleBtCommand(uint8_t cmd) {
   }
 }
 
-// ===================== 蓝牙接收处理 =====================
-void handleBluetooth() {
-  if (!btConnected) return;
+// ===================== 触摸辅助 =====================
+bool getTouchPoint(int &tx, int &ty) {
+  if (!ts.tirqTouched()) return false;
+  if (!ts.touched()) return false;
 
-  int available = SerialBT.available();
-  if (available <= 0) return;
+  TS_Point p = ts.getPoint();
 
-  uint8_t buf[512];
-  int len = SerialBT.readBytes(buf, min(available, 512));
+  tx = map(p.x, 200, 3700, 0, SCREEN_W);
+  ty = map(p.y, 240, 3800, 0, SCREEN_H);
 
-  for (int i = 0; i < len; i++) {
-    uint8_t b = buf[i];
+  if (tx < 0) tx = 0;
+  if (tx >= SCREEN_W) tx = SCREEN_W - 1;
+  if (ty < 0) ty = 0;
+  if (ty >= SCREEN_H) ty = SCREEN_H - 1;
 
-    switch (btState) {
-      case BT_IDLE:
-        // 蓝牙遥控命令（0xC0-0xC5）
-        if (b >= 0xC0 && b <= 0xC5) {
-          handleBtCommand(b);
-        }
-        // 时间同步命令 0xD0
-        else if (b == (uint8_t)0xD0) {
-          btRecvTime = true;
-          btTimeBufIdx = 0;
-        }
-        // 如果正在接收时间戳数据
-        else if (btRecvTime) {
-          btTimeBuf[btTimeBufIdx++] = b;
-          if (btTimeBufIdx >= 4) {
-            uint32_t ts = ((uint32_t)btTimeBuf[0] << 24) | ((uint32_t)btTimeBuf[1] << 16) |
-                         ((uint32_t)btTimeBuf[2] << 8) | btTimeBuf[3];
-            syncedTime = ts;
-            syncMillis = millis();
-            timeSynced = true;
-            btRecvTime = false;
-            Serial.printf("[BT] 时间已同步: %u\n", ts);
-            SerialBT.write("OK\n");
-            // 立即刷新时钟显示
-            if (screen == LIST) drawListScreen();
-          }
-        }
-        // 等待起始标记 0xAB
-        else if (b == 0xAB) {
-          btState = BT_RECV_NAME;
-          btFileName = "";
-          btFileSize = 0;
-          btReceived = 0;
-          btSizeIdx = 0;
-        }
-        break;
+  return true;
+}
 
-      case BT_RECV_NAME:
-        // 读取文件名，直到遇到 0x00 分隔符
-        if (b == 0x00) {
-          btState = BT_RECV_SIZE;
-          btSizeIdx = 0;
-        } else {
-          btFileName += (char)b;
-        }
-        break;
+bool pointInRect(int px, int py, int rx, int ry, int rw, int rh) {
+  return (px >= rx && px < rx + rw && py >= ry && py < ry + rh);
+}
 
-      case BT_RECV_SIZE:
-        // 读取 4 字节文件大小（小端序）
-        btSizeBuf[btSizeIdx++] = b;
-        if (btSizeIdx >= 4) {
-          btFileSize = btSizeBuf[0] | (btSizeBuf[1] << 8) |
-                       (btSizeBuf[2] << 16) | (btSizeBuf[3] << 24);
+bool pointInCircle(int px, int py, int cx, int cy, int radius) {
+  int dx = px - cx;
+  int dy = py - cy;
+  return (dx * dx + dy * dy) <= radius * radius;
+}
 
-          Serial.printf("[BT] 接收文件: %s (%u 字节)\n", btFileName.c_str(), btFileSize);
+// ===================== 初始化 =====================
+void setup() {
+  Serial.begin(115200);
+  delay(500);
 
-          // 检查文件名是否合法
-          if (btFileName.length() == 0 || btFileSize == 0 || btFileSize > 50 * 1024 * 1024) {
-            Serial.println("[BT] 无效的文件头");
-            SerialBT.write("ERR\n");
-            btState = BT_IDLE;
-            break;
-          }
+  // 触摸初始化 (使用独立 SPI)
+  touchSPI.begin(TOUCH_SCLK, TOUCH_MISO, TOUCH_MOSI, XPT2046_CS);
+  ts.begin(touchSPI);
+  ts.setRotation(0);
 
-          // 打开文件准备写入
-          String path = "/" + btFileName;
-          btFile = SD.open(path.c_str(), FILE_WRITE);
-          if (!btFile) {
-            Serial.printf("[BT] 无法创建文件: %s\n", path.c_str());
-            SerialBT.write("ERR\n");
-            btState = BT_IDLE;
-            break;
-          }
+  // 关键：先初始化主SPI总线 (ESP32-S3必须显式调用)
+  SPI.begin(12, SD_MISO, 11, -1);  // SCK=12, MISO=13, MOSI=11, CS=-1
+  delay(100);
 
-          btReceived = 0;
-          btState = BT_RECV_DATA;
-          screen = BT_TRANSFER;
-          drawBtTransferScreen();
-        }
-        break;
+  // 屏幕初始化
+  tft.init();
+  tft.invertDisplay(true);  // 修复反色问题
+  tft.setRotation(0);
+  tft.fillScreen(BG_COLOR);
+  tft.setTextColor(TEXT_COLOR, BG_COLOR);
+  tft.setTextSize(2);
+  showMessage("初始化...");
 
-      case BT_RECV_DATA:
-        // 写入 SD 卡
-        btFile.write(&b, 1);
-        btReceived++;
-
-        // 每收到约 4KB 更新一次进度显示（避免刷屏太快）
-        if (btReceived % 4096 == 0) {
-          drawBtProgress();
-        }
-
-        // 接收完成
-        if (btReceived >= btFileSize) {
-          btFile.close();
-          Serial.printf("[BT] 接收完成: %s\n", btFileName.c_str());
-          SerialBT.write("OK\n");
-
-          // 重新扫描文件列表
-          scanAudioFiles();
-          btState = BT_IDLE;
-
-          // 短暂显示完成信息
-          drawBtComplete();
-
-          // 2秒后回到列表
-          delay(2000);
-          if (screen == BT_TRANSFER) {
-            screen = LIST;
-            if (currentIndex >= fileCount) currentIndex = 0;
-            drawListScreen();
-          }
-        }
-        break;
+  // SD 卡初始化
+  bool sdOK = false;
+  for (int i = 0; i < 3; i++) {
+    if (SD.begin(SD_CS, SPI)) {
+      sdOK = true;
+      break;
     }
+    Serial.printf("SD卡初始化失败，重试 %d/3\n", i + 1);
+    delay(500);
   }
-}
-
-// ===================== 时间同步辅助 =====================
-unsigned long getCurrentTime() {
-  if (!timeSynced) return 0;
-  return syncedTime + ((millis() - syncMillis) / 1000UL);
-}
-
-// ===================== 蓝牙传输界面 =====================
-void drawBtTransferScreen() {
-  tft.fillScreen(BG_COLOR);
-
-  tft.setTextColor(BT_COLOR, BG_COLOR);
-  tft.setTextSize(2);
-  tft.setTextDatum(TC_DATUM);
-  tft.drawString("BT Receiving", SCREEN_W / 2, 10);
-
-  // 分隔线
-  tft.drawFastHLine(10, 32, SCREEN_W - 20, TFT_DARKGREY);
-
-  // 文件名
-  tft.setTextColor(TEXT_COLOR, BG_COLOR);
-  tft.setTextSize(1);
-  tft.setTextDatum(TC_DATUM);
-  String name = btFileName;
-  if (name.length() > 30) name = name.substring(0, 27) + "...";
-  tft.drawString(name.c_str(), SCREEN_W / 2, 40);
-
-  drawBtProgress();
-}
-
-void drawBtProgress() {
-  int barX = 10, barY = 65, barW = SCREEN_W - 20, barH = 12;
-
-  // 进度条
-  tft.fillRoundRect(barX, barY, barW, barH, 3, TFT_DARKGREY);
-  int progress = 0;
-  if (btFileSize > 0) {
-    progress = (int)((uint64_t)btReceived * barW / btFileSize);
-  }
-  if (progress > 0) {
-    tft.fillRoundRect(barX + 1, barY + 1, progress, barH - 2, 3, BT_COLOR);
-  }
-
-  // 百分比
-  tft.fillRect(0, barY + 16, SCREEN_W, 20, BG_COLOR);
-  tft.setTextColor(TEXT_COLOR, BG_COLOR);
-  tft.setTextSize(2);
-  tft.setTextDatum(TC_DATUM);
-  int pct = 0;
-  if (btFileSize > 0) {
-    pct = (int)((uint64_t)btReceived * 100 / btFileSize);
-  }
-  tft.printf("%d%%", pct);
-
-  // 已接收 / 总大小
-  tft.setTextSize(1);
-  tft.setTextColor(TFT_LIGHTGREY, BG_COLOR);
-  tft.drawString(formatSize(btReceived), SCREEN_W / 4, barY + 42);
-  tft.drawString(formatSize(btFileSize), SCREEN_W * 3 / 4, barY + 42);
-
-  // 蓝牙图标
-  tft.setTextSize(1);
-  tft.setTextColor(btConnected ? BT_COLOR : TFT_DARKGREY, BG_COLOR);
-  tft.drawString(btConnected ? "BT Connected" : "BT Disconnected", SCREEN_W / 2, barY + 60);
-
-  // 提示
-  drawBtFooter();
-}
-
-void drawBtComplete() {
-  tft.fillScreen(BG_COLOR);
-
-  tft.setTextColor(PLAYING_COLOR, BG_COLOR);
-  tft.setTextSize(3);
-  tft.setTextDatum(MC_DATUM);
-  tft.drawString("DONE!", SCREEN_W / 2, SCREEN_H / 2 - 20);
-
-  tft.setTextColor(TEXT_COLOR, BG_COLOR);
-  tft.setTextSize(1);
-  tft.drawString(btFileName.c_str(), SCREEN_W / 2, SCREEN_H / 2 + 15);
-  tft.drawString(formatSize(btFileSize), SCREEN_W / 2, SCREEN_H / 2 + 30);
-
-  tft.setTextColor(TFT_DARKGREY, BG_COLOR);
-  tft.drawString("Returning to list...", SCREEN_W / 2, SCREEN_H / 2 + 55);
-  tft.setTextDatum(TL_DATUM);
-}
-
-void drawBtFooter() {
-  tft.fillRect(0, SCREEN_H - FOOTER_H, SCREEN_W, FOOTER_H, TFT_DARKGREY);
-  tft.setTextColor(TFT_WHITE, TFT_DARKGREY);
-  tft.setTextSize(1);
-  tft.setTextDatum(TC_DATUM);
-  if (btState == BT_RECV_DATA) {
-    tft.drawString("Receiving... wait", SCREEN_W / 2, SCREEN_H - FOOTER_H + 5);
+  if (!sdOK) {
+    showMessage("SD卡失败! 检查接线");
+    Serial.println("[SD] 初始化失败！请检查：");
+    Serial.println("  1. SD卡是否插入");
+    Serial.println("  2. CS->GPIO14, SCK->GPIO12, MOSI->GPIO11, MISO->GPIO13");
+    Serial.println("  3. SD卡是否FAT32格式");
+    Serial.println("  4. VCC->3.3V, GND->GND");
   } else {
-    tft.drawString("Waiting for file...", SCREEN_W / 2, SCREEN_H - FOOTER_H + 5);
+    showMessage("SD卡OK");
+    Serial.println("[SD] 初始化成功");
   }
-  tft.setTextDatum(TL_DATUM);
+  delay(300);
+
+  // BLE 蓝牙初始化 (ESP32-S3 支持 BLE)
+  Serial.println("[BLE] 正在启动BLE...");
+  BLEDevice::init("ESP32_MusicBox");
+
+  // 创建BLE服务器
+  pServer = BLEDevice::createServer();
+  pServer->setCallbacks(new MyServerCallbacks());
+
+  // 创建BLE服务
+  BLEService *pService = pServer->createService(BLE_SERVICE_UUID);
+
+  // 创建TX特征值 (ESP32发送，手机接收，使用通知)
+  pTxCharacteristic = pService->createCharacteristic(
+                         BLE_CHARACTERISTIC_TX_UUID,
+                         BLECharacteristic::PROPERTY_NOTIFY
+                       );
+  pTxCharacteristic->addDescriptor(new BLE2902());
+
+  // 创建RX特征值 (手机写入，ESP32接收)
+  pRxCharacteristic = pService->createCharacteristic(
+                        BLE_CHARACTERISTIC_RX_UUID,
+                        BLECharacteristic::PROPERTY_WRITE
+                      );
+  pRxCharacteristic->setCallbacks(new MyRxCallbacks());
+
+  // 启动服务
+  pService->start();
+
+  // 开始广播
+  BLEAdvertising *pAdvertising = BLEDevice::getAdvertising();
+  pAdvertising->addServiceUUID(BLE_SERVICE_UUID);
+  pAdvertising->setScanResponse(true);
+  pAdvertising->setMinPreferred(0x06);  // 有助于连接稳定性
+  pAdvertising->setMinPreferred(0x12);
+  BLEDevice::startAdvertising();
+
+  Serial.println("[BLE] BLE已启动，设备名: ESP32_MusicBox");
+  Serial.println("[BLE] 等待手机连接...");
+  showMessage("BLE Ready!");
+
+  delay(500);
+
+  scanAudioFiles();
+
+  audio.setPinout(I2S_BCLK, I2S_LRC, I2S_DOUT);
+  audio.setVolume(volume);
+
+  drawListScreen();
 }
 
-String formatSize(uint32_t bytes) {
-  if (bytes < 1024) return String(bytes) + " B";
-  if (bytes < 1024 * 1024) return String(bytes / 1024) + " KB";
-  return String(bytes / 1024 / 1024) + " MB";
+// ===================== 主循环 =====================
+void loop() {
+  audio.loop();
+  handleTouch();
+
+  // BLE 断开重连处理
+  if (!deviceConnected && oldDeviceConnected) {
+    delay(500);
+    pServer->getAdvertising()->start();
+    oldDeviceConnected = deviceConnected;
+  }
+  if (deviceConnected && !oldDeviceConnected) {
+    oldDeviceConnected = deviceConnected;
+  }
+
+  if (screen == PLAYING && isPlaying && !isPaused) {
+    updateProgress();
+  }
 }
 
-// ===================== 按键处理 =====================
-void handleButtons() {
-  if (millis() - lastBtnTime < DEBOUNCE_MS) return;
+// ===================== 触摸处理 =====================
+void handleTouch() {
+  if (millis() - lastTouchTime < TOUCH_DEBOUNCE) return;
 
-  // 蓝牙接收中只允许返回键中断
+  int tx, ty;
+  if (!getTouchPoint(tx, ty)) return;
+
+  lastTouchTime = millis();
+  Serial.printf("[Touch] x=%d y=%d\n", tx, ty);
+
+  // 蓝牙传输界面: 点击任意位置取消
   if (screen == BT_TRANSFER) {
-    if (digitalRead(BTN_BACK) == LOW) {
-      // 取消接收
-      if (btFile) btFile.close();
-      btState = BT_IDLE;
-      screen = LIST;
-      drawListScreen();
-      lastBtnTime = millis();
+    if (btFile) btFile.close();
+    btState = BT_IDLE;
+    screen = LIST;
+    if (currentIndex >= fileCount) currentIndex = 0;
+    drawListScreen();
+    return;
+  }
+
+  if (screen == LIST) {
+    handleListTouch(tx, ty);
+  } else if (screen == PLAYING) {
+    handlePlayTouch(tx, ty);
+  }
+}
+
+// 列表界面触摸处理
+void handleListTouch(int tx, int ty) {
+  // 点击列表区域: 选择歌曲
+  if (ty >= LIST_AREA_Y && ty < LIST_AREA_Y + LIST_AREA_H) {
+    int row = (ty - LIST_AREA_Y) / ROW_HEIGHT;
+    int idx = scrollOffset + row;
+
+    if (idx >= 0 && idx < fileCount) {
+      if (idx == currentIndex) {
+        playFile(idx);
+      } else {
+        currentIndex = idx;
+        checkScroll();
+        drawListScreen();
+      }
     }
     return;
   }
 
-  if (digitalRead(BTN_UP) == LOW) {
-    if (screen == LIST) {
+  // 点击底部按钮区域
+  if (ty >= SCREEN_H - FOOTER_H) {
+    int btnW = SCREEN_W / 3;
+    if (tx < btnW) {
       if (currentIndex > 0) { currentIndex--; checkScroll(); drawListScreen(); }
+    } else if (tx < btnW * 2) {
+      playFile(currentIndex);
     } else {
-      if (volume < 21) { volume++; audio.setVolume(volume); drawVolumeBar(); }
-    }
-    lastBtnTime = millis(); return;
-  }
-
-  if (digitalRead(BTN_DOWN) == LOW) {
-    if (screen == LIST) {
       if (currentIndex < fileCount - 1) { currentIndex++; checkScroll(); drawListScreen(); }
-    } else {
-      if (volume > 0) { volume--; audio.setVolume(volume); drawVolumeBar(); }
     }
-    lastBtnTime = millis(); return;
+    return;
   }
 
-  if (digitalRead(BTN_OK) == LOW) {
-    if (screen == LIST) playFile(currentIndex);
-    else togglePause();
-    lastBtnTime = millis(); return;
-  }
-
-  if (digitalRead(BTN_BACK) == LOW) {
-    if (screen == LIST) { currentIndex = 0; scrollOffset = 0; drawListScreen(); }
-    else playPrevious();
-    lastBtnTime = millis(); return;
-  }
-
-  if (digitalRead(BTN_MENU) == LOW) {
-    if (screen == PLAYING) { screen = LIST; drawListScreen(); }
-    else if (screen == LIST && playingIndex >= 0) {
-      currentIndex = playingIndex; checkScroll(); drawListScreen();
+  // 上半部分空白区域: 上滑
+  if (ty < LIST_AREA_Y + LIST_AREA_H / 2) {
+    scrollOffset -= VISIBLE_ROWS;
+    if (scrollOffset < 0) scrollOffset = 0;
+    if (currentIndex > scrollOffset + VISIBLE_ROWS - 1)
+      currentIndex = scrollOffset + VISIBLE_ROWS - 1;
+    drawListScreen();
+  } else {
+    if (scrollOffset + VISIBLE_ROWS < fileCount) {
+      scrollOffset += VISIBLE_ROWS;
+      if (currentIndex < scrollOffset) currentIndex = scrollOffset;
+      drawListScreen();
     }
-    lastBtnTime = millis(); return;
+  }
+}
+
+// 播放界面触摸处理
+void handlePlayTouch(int tx, int ty) {
+  // 返回按钮 (左上角)
+  if (pointInRect(tx, ty, 0, 0, 60, 36)) {
+    screen = LIST;
+    drawListScreen();
+    return;
+  }
+
+  int btnR = 22;
+
+  if (pointInCircle(tx, ty, BTN_PREV_X, PLAY_BTN_Y, btnR)) {
+    playPrevious();
+    return;
+  }
+
+  if (pointInCircle(tx, ty, BTN_VOL_DOWN_X, PLAY_BTN_Y, btnR)) {
+    if (volume > 0) { volume--; audio.setVolume(volume); drawVolumeBar(); }
+    return;
+  }
+
+  if (pointInCircle(tx, ty, BTN_PLAY_X, PLAY_BTN_Y, btnR + 5)) {
+    togglePause();
+    return;
+  }
+
+  if (pointInCircle(tx, ty, BTN_VOL_UP_X, PLAY_BTN_Y, btnR)) {
+    if (volume < 21) { volume++; audio.setVolume(volume); drawVolumeBar(); }
+    return;
+  }
+
+  if (pointInCircle(tx, ty, BTN_NEXT_X, PLAY_BTN_Y, btnR)) {
+    playNext();
+    return;
   }
 }
 
@@ -618,7 +728,7 @@ void playFile(int index) {
 
 void togglePause() {
   if (!isPlaying && !isPaused) return;
-  audio.pauseSong();
+  audio.pauseResume();
   isPaused = !isPaused;
   isPlaying = !isPaused;
   drawPlayScreen();
@@ -692,210 +802,298 @@ void drawFooter(const char* text) {
   tft.setTextColor(TFT_WHITE, TFT_DARKGREY);
   tft.setTextSize(1);
   tft.setTextDatum(TC_DATUM);
-  tft.drawString(text, SCREEN_W / 2, SCREEN_H - FOOTER_H + 5);
+  tft.drawString(text, SCREEN_W / 2, SCREEN_H - FOOTER_H + 8);
   tft.setTextDatum(TL_DATUM);
 }
 
+// 绘制圆形按钮
+void drawCircleBtn(int cx, int cy, int r, const char* label, uint16_t color) {
+  tft.fillCircle(cx, cy, r, color);
+  tft.drawCircle(cx, cy, r, TFT_WHITE);
+  tft.setTextColor(TFT_WHITE, color);
+  tft.setTextSize(1);
+  tft.setTextDatum(MC_DATUM);
+  tft.drawString(label, cx, cy);
+  tft.setTextDatum(TL_DATUM);
+}
+
+// ===================== 列表界面 =====================
 void drawListScreen() {
   tft.fillScreen(BG_COLOR);
 
+  // 标题栏
   tft.fillRect(0, 0, SCREEN_W, HEADER_H, TFT_DARKGREY);
-
-  // 第一行: Music 序号 + 时钟
   tft.setTextColor(TFT_WHITE, TFT_DARKGREY);
-  tft.setTextSize(2);
+  tft.setTextSize(1);
   tft.setTextDatum(TL_DATUM);
-  tft.setCursor(4, 2);
-  tft.printf("Music %d/%d", currentIndex + 1, fileCount);
 
+  char buf[32];
+  sprintf(buf, "音乐 %d/%d", fileCount > 0 ? currentIndex + 1 : 0, fileCount);
+  tft.drawString(buf, 4, 4);
+
+  // 蓝牙状态
+  if (deviceConnected) {
+    tft.setTextColor(TFT_GREEN, TFT_DARKGREY);
+    tft.drawString("BT", SCREEN_W / 2 - 10, 4);
+  } else {
+    tft.setTextColor(TFT_RED, TFT_DARKGREY);
+    tft.drawString("BT", SCREEN_W / 2 - 10, 4);
+  }
+
+  // 播放指示
+  if (playingIndex >= 0) {
+    tft.setTextColor(PLAYING_COLOR, TFT_DARKGREY);
+    tft.drawString("PLAY", SCREEN_W / 2 + 20, 4);
+  }
+
+  // 时钟显示
   if (timeSynced) {
-    unsigned long t = getCurrentTime();
-    unsigned int h = (t % 86400UL) / 3600UL;
-    unsigned int m = (t % 3600UL) / 60UL;
+    unsigned long now = getCurrentTime();
+    unsigned long hours = (now % 86400) / 3600;
+    unsigned long mins = (now % 3600) / 60;
+    char timeBuf[16];
+    sprintf(timeBuf, "%02lu:%02lu", hours, mins);
     tft.setTextColor(TFT_CYAN, TFT_DARKGREY);
     tft.setTextDatum(TR_DATUM);
-    tft.drawString(String::format("%02d:%02d", h, m).c_str(), SCREEN_W - 4, 2);
+    tft.drawString(timeBuf, SCREEN_W - 4, 2);
+    tft.setTextDatum(TL_DATUM);
   }
 
-  // 第二行: 蓝牙状态 + 年月日
-  tft.setTextSize(1);
   tft.setTextDatum(TL_DATUM);
-  tft.setCursor(4, 18);
-  if (btConnected) {
-    tft.setTextColor(BT_COLOR, TFT_DARKGREY);
-    tft.print("BT");
-  }
 
-  if (timeSynced) {
-    unsigned long t = getCurrentTime();
-    unsigned long days = t / 86400UL;
-    unsigned int y = 1970;
-    // 计算年月日
-    static const uint8_t daysInMonth[] = {31,28,31,30,31,30,31,31,30,31,30,31};
-    while (1) {
-      unsigned int daysInYear = 365;
-      if ((y % 4 == 0 && y % 100 != 0) || y % 400 == 0) daysInYear = 366;
-      if (days < (unsigned long)daysInYear) break;
-      days -= daysInYear;
-      y++;
-    }
-    bool leap = (y % 4 == 0 && y % 100 != 0) || y % 400 == 0;
-    unsigned int mo = 0;
-    for (; mo < 12; mo++) {
-      unsigned int dim = daysInMonth[mo];
-      if (mo == 1 && leap) dim = 29;
-      if (days < (unsigned long)dim) break;
-      days -= dim;
-    }
-    unsigned int d = (unsigned int)(days + 1);
-    tft.setTextColor(TFT_LIGHTGREY, TFT_DARKGREY);
-    tft.setTextDatum(TR_DATUM);
-    tft.drawString(String::format("%d.%d.%d", y, mo + 1, d).c_str(), SCREEN_W - 4, 18);
-  } else {
-    // 未同步时间时，PLAY 指示放右上角
-    if (playingIndex >= 0) {
-      tft.setTextColor(PLAYING_COLOR, TFT_DARKGREY);
-      tft.setTextDatum(TR_DATUM);
-      tft.drawString("PLAY", SCREEN_W - 4, 18);
-    }
-  }
-
-  tft.setTextSize(1);
+  // 文件列表
+  int y = LIST_AREA_Y;
   for (int i = 0; i < VISIBLE_ROWS; i++) {
     int idx = scrollOffset + i;
     if (idx >= fileCount) break;
-    int y = HEADER_H + i * ROW_HEIGHT;
 
-    if (idx == currentIndex) {
-      tft.fillRect(0, y, SCREEN_W, ROW_HEIGHT, HIGHLIGHT_COLOR);
-      tft.setTextColor(TFT_WHITE, HIGHLIGHT_COLOR);
-    } else if (idx == playingIndex) {
-      tft.fillRect(0, y, SCREEN_W, ROW_HEIGHT, 0x0120);
-      tft.setTextColor(PLAYING_COLOR, 0x0120);
-    } else {
-      tft.setTextColor(TEXT_COLOR, BG_COLOR);
-    }
+    bool isCurrent = (idx == currentIndex);
+    bool isPlaying = (idx == playingIndex);
 
-    tft.setCursor(4, y + 4);
-    tft.printf("%02d ", idx + 1);
+    uint16_t bgColor = isCurrent ? HIGHLIGHT_COLOR : BG_COLOR;
+    uint16_t fgColor = isCurrent ? TFT_WHITE : TEXT_COLOR;
 
-    String name = fileList[idx];
-    if (name.length() > 28) name = name.substring(0, 25) + "...";
-    tft.print(name);
+    tft.fillRect(0, y, SCREEN_W, ROW_HEIGHT, bgColor);
 
-    if (idx == playingIndex && idx != currentIndex) {
-      tft.setTextColor(PLAYING_COLOR, BG_COLOR);
+    // 序号
+    tft.setTextColor(fgColor, bgColor);
+    tft.setTextSize(1);
+    char num[8];
+    sprintf(num, "%02d", idx + 1);
+    tft.drawString(num, 4, y + 4);
+
+    // 文件名 (不带后缀)
+    String displayName = removeExtension(fileList[idx]);
+    if (displayName.length() > 26) displayName = displayName.substring(0, 25) + "~";
+    tft.drawString(displayName, 28, y + 4);
+
+    // 播放标记
+    if (isPlaying) {
+      tft.setTextColor(PLAYING_COLOR, bgColor);
       tft.setTextDatum(TR_DATUM);
       tft.drawString(">", SCREEN_W - 4, y + 4);
       tft.setTextDatum(TL_DATUM);
     }
+
+    y += ROW_HEIGHT;
   }
 
-  if (fileCount > VISIBLE_ROWS) {
-    int barH = SCREEN_H - HEADER_H - FOOTER_H;
-    int knobH = barH * VISIBLE_ROWS / fileCount;
-    int knobY = HEADER_H + barH * scrollOffset / fileCount;
-    tft.fillRect(SCREEN_W - 3, HEADER_H, 3, barH, TFT_DARKGREY);
-    tft.fillRect(SCREEN_W - 3, knobY, 3, knobH, TFT_LIGHTGREY);
-  }
-
-  drawFooter("UP/DOWN select  OK play  BACK top  MENU jump");
+  // 底部按钮栏
+  drawFooter("  UP   |  PLAY  | DOWN");
 }
 
+// ===================== 播放界面 =====================
 void drawPlayScreen() {
   tft.fillScreen(BG_COLOR);
 
-  tft.setTextColor(ACCENT_COLOR, BG_COLOR);
-  tft.setTextSize(2);
-  tft.setTextDatum(TC_DATUM);
-  tft.drawString(">> Playing <<", SCREEN_W / 2, 8);
-
-  tft.drawFastHLine(10, 30, SCREEN_W - 20, TFT_DARKGREY);
-
-  tft.setTextColor(TEXT_COLOR, BG_COLOR);
-  tft.setTextSize(2);
-  tft.setTextDatum(TC_DATUM);
-  String name = removeExtension(fileList[playingIndex]);
-  if (name.length() > 18) name = name.substring(0, 15) + "...";
-  tft.drawString(name.c_str(), SCREEN_W / 2, 42);
-
-  tft.setTextSize(3);
-  tft.setTextColor(isPaused ? TFT_YELLOW : PLAYING_COLOR, BG_COLOR);
-  tft.drawString(isPaused ? "|| PAUSE" : "> PLAY", SCREEN_W / 2, 72);
-
-  tft.drawRoundRect(10, 112, SCREEN_W - 20, 10, 3, TFT_DARKGREY);
-
-  tft.fillRect(8, 128, SCREEN_W - 16, 18, BG_COLOR);
-
+  // 顶部栏
+  tft.fillRect(0, 0, SCREEN_W, HEADER_H, TFT_DARKGREY);
+  tft.setTextColor(TFT_WHITE, TFT_DARKGREY);
   tft.setTextSize(1);
-  tft.setTextColor(TEXT_COLOR, BG_COLOR);
   tft.setTextDatum(TL_DATUM);
-  tft.setCursor(10, 155);
-  tft.printf("VOL: %d/21", volume);
+  tft.drawString("< List", 4, 4);
+  tft.setTextDatum(TR_DATUM);
+  tft.drawString("Playing", SCREEN_W - 4, 4);
+  tft.setTextDatum(TL_DATUM);
 
-  drawVolumeBar();
-
-  drawFooter("UP/DOWN vol  OK pause  BACK prev  MENU list");
-}
-
-void drawVolumeBar() {
-  int barX = 10, barY = 172, barW = SCREEN_W - 20, barH = 8;
-  tft.fillRoundRect(barX, barY, barW, barH, 2, TFT_DARKGREY);
-  int fillW = map(volume, 0, 21, 0, barW - 2);
-  if (fillW > 0) {
-    tft.fillRoundRect(barX + 1, barY + 1, fillW, barH - 2, 2, PROGRESS_COLOR);
+  // 歌曲名
+  if (playingIndex >= 0) {
+    String songName = removeExtension(fileList[playingIndex]);
+    tft.setTextColor(TEXT_COLOR, BG_COLOR);
+    tft.setTextSize(2);
+    tft.setTextDatum(TC_DATUM);
+    if (songName.length() > 14) songName = songName.substring(0, 13) + "~";
+    tft.drawString(songName, SCREEN_W / 2, 60);
+    tft.setTextDatum(TL_DATUM);
   }
 
+  // 播放/暂停状态
+  tft.setTextSize(3);
+  tft.setTextDatum(TC_DATUM);
+  if (isPlaying && !isPaused) {
+    tft.setTextColor(PLAYING_COLOR, BG_COLOR);
+    tft.drawString("> PLAY", SCREEN_W / 2, 110);
+  } else {
+    tft.setTextColor(TFT_YELLOW, BG_COLOR);
+    tft.drawString("|| PAUSE", SCREEN_W / 2, 110);
+  }
+  tft.setTextDatum(TL_DATUM);
   tft.setTextSize(1);
-  tft.setTextColor(TFT_DARKGREY, BG_COLOR);
-  tft.setTextDatum(TL_DATUM);
-  tft.drawString("0", barX, barY + 12);
-  tft.setTextDatum(TR_DATUM);
-  tft.drawString("21", barX + barW, barY + 12);
-  tft.setTextDatum(TL_DATUM);
+
+  // 进度条
+  updateProgress();
+
+  // 音量
+  drawVolumeBar();
+
+  // 触摸按钮
+  tft.setTextSize(1);
+  drawCircleBtn(BTN_PREV_X, PLAY_BTN_Y, 22, "PREV", BTN_COLOR);
+  drawCircleBtn(BTN_VOL_DOWN_X, PLAY_BTN_Y, 20, "V-", BTN_COLOR);
+  drawCircleBtn(BTN_PLAY_X, PLAY_BTN_Y, 25, "P/P", BTN_ACTIVE);
+  drawCircleBtn(BTN_VOL_UP_X, PLAY_BTN_Y, 20, "V+", BTN_COLOR);
+  drawCircleBtn(BTN_NEXT_X, PLAY_BTN_Y, 22, "NEXT", BTN_COLOR);
+
+  // 底部提示
+  drawFooter("tap buttons to control");
 }
 
+// ===================== 进度更新 =====================
 void updateProgress() {
-  static unsigned long lastProgressUpdate = 0;
-  if (millis() - lastProgressUpdate < 500) return;
-  lastProgressUpdate = millis();
+  if (playingIndex < 0) return;
 
   uint32_t total = audio.getAudioFileDuration();
   uint32_t current = audio.getAudioCurrentTime();
 
   if (total > 0) {
-    int progress = map(current, 0, total, 0, SCREEN_W - 24);
+    // 进度条
+    int barX = 20, barY = 160, barW = 200, barH = 8;
+    tft.fillRect(barX, barY, barW, barH, TFT_DARKGREY);
+    int fillW = (int)((current * barW) / total);
+    tft.fillRect(barX, barY, fillW, barH, PROGRESS_COLOR);
 
-    tft.fillRoundRect(12, 114, SCREEN_W - 24, 6, 2, BG_COLOR);
-    if (progress > 0) {
-      tft.fillRoundRect(12, 114, progress, 6, 2, PROGRESS_COLOR);
-    }
-
-    tft.fillRect(8, 128, SCREEN_W - 16, 18, BG_COLOR);
-    tft.setTextColor(TFT_LIGHTGREY, BG_COLOR);
+    // 时间显示
+    char timeBuf[32];
+    sprintf(timeBuf, "%02d:%02d   %02d:%02d",
+            current / 60, current % 60,
+            total / 60, total % 60);
+    tft.setTextColor(TEXT_COLOR, BG_COLOR);
     tft.setTextSize(1);
+    tft.setTextDatum(TC_DATUM);
+    tft.drawString(timeBuf, SCREEN_W / 2, barY + 12);
     tft.setTextDatum(TL_DATUM);
-    tft.drawString(formatTime(current), 10, 130);
-    tft.setTextDatum(TR_DATUM);
-    tft.drawString(formatTime(total), SCREEN_W - 10, 130);
-    tft.setTextDatum(TL_DATUM);
-  }
-
-  if (!audio.isRunning() && isPlaying && !isPaused) {
-    delay(500);
-    if (!audio.isRunning()) playNext();
   }
 }
 
-String formatTime(uint32_t seconds) {
-  int m = seconds / 60;
-  int s = seconds % 60;
-  char buf[8];
-  sprintf(buf, "%02d:%02d", m, s);
+// ===================== 音量条 =====================
+void drawVolumeBar() {
+  tft.setTextColor(TEXT_COLOR, BG_COLOR);
+  tft.setTextSize(1);
+  tft.setTextDatum(TL_DATUM);
+  char volBuf[16];
+  sprintf(volBuf, "VOL: %d/21", volume);
+  tft.drawString(volBuf, 20, 195);
+
+  // 音量条
+  int barX = 20, barY = 210, barW = 200, barH = 6;
+  tft.fillRect(barX, barY, barW, barH, TFT_DARKGREY);
+  int fillW = (volume * barW) / 21;
+  tft.fillRect(barX, barY, fillW, barH, ACCENT_COLOR);
+}
+
+// ===================== 蓝牙传输界面 =====================
+void drawBtTransferScreen() {
+  tft.fillScreen(BG_COLOR);
+
+  // 标题
+  tft.fillRect(0, 0, SCREEN_W, HEADER_H, BT_COLOR);
+  tft.setTextColor(TFT_WHITE, BT_COLOR);
+  tft.setTextSize(2);
+  tft.setTextDatum(TC_DATUM);
+  tft.drawString("BLE 接收", SCREEN_W / 2, 10);
+  tft.setTextDatum(TL_DATUM);
+
+  // 文件名
+  tft.setTextColor(TEXT_COLOR, BG_COLOR);
+  tft.setTextSize(1);
+  tft.setTextDatum(TL_DATUM);
+  tft.drawString("文件:", 10, 50);
+  if (btFileName.length() > 28) {
+    tft.drawString(btFileName.substring(0, 27) + "~", 10, 65);
+  } else {
+    tft.drawString(btFileName, 10, 65);
+  }
+
+  drawBtProgress();
+  drawBtFooter();
+}
+
+void drawBtProgress() {
+  if (btFileSize == 0) return;
+
+  int pct = (btReceived * 100) / btFileSize;
+
+  // 进度条
+  int barX = 20, barY = 130, barW = 200, barH = 16;
+  tft.fillRect(barX, barY, barW, barH, TFT_DARKGREY);
+  int fillW = (pct * barW) / 100;
+  tft.fillRect(barX, barY, fillW, barH, PROGRESS_COLOR);
+
+  // 百分比 (大号字体)
+  char pctBuf[16];
+  sprintf(pctBuf, "%d%%", pct);
+  tft.setTextColor(PLAYING_COLOR, BG_COLOR);
+  tft.setTextSize(4);
+  tft.setTextDatum(TC_DATUM);
+  tft.drawString(pctBuf, SCREEN_W / 2, 170);
+  tft.setTextDatum(TL_DATUM);
+
+  // 已接收/总大小
+  char sizeBuf[48];
+  sprintf(sizeBuf, "%s / %s", formatSize(btReceived).c_str(), formatSize(btFileSize).c_str());
+  tft.setTextColor(TEXT_COLOR, BG_COLOR);
+  tft.setTextSize(1);
+  tft.setTextDatum(TC_DATUM);
+  tft.drawString(sizeBuf, SCREEN_W / 2, 210);
+  tft.setTextDatum(TL_DATUM);
+}
+
+void drawBtComplete() {
+  tft.fillScreen(BG_COLOR);
+  tft.setTextColor(PLAYING_COLOR, BG_COLOR);
+  tft.setTextSize(3);
+  tft.setTextDatum(MC_DATUM);
+  tft.drawString("DONE!", SCREEN_W / 2, SCREEN_H / 2 - 20);
+
+  tft.setTextSize(1);
+  tft.setTextColor(TEXT_COLOR, BG_COLOR);
+  tft.drawString(btFileName, SCREEN_W / 2, SCREEN_H / 2 + 20);
+  tft.setTextDatum(TL_DATUM);
+}
+
+void drawBtFooter() {
+  tft.fillRect(0, SCREEN_H - FOOTER_H, SCREEN_W, FOOTER_H, TFT_DARKGREY);
+  tft.setTextColor(TFT_WHITE, TFT_DARKGREY);
+  tft.setTextSize(1);
+  tft.setTextDatum(TC_DATUM);
+  tft.drawString("touch to cancel", SCREEN_W / 2, SCREEN_H - FOOTER_H + 8);
+  tft.setTextDatum(TL_DATUM);
+}
+
+// ===================== 辅助函数 =====================
+String formatSize(uint32_t bytes) {
+  char buf[32];
+  if (bytes >= 1024 * 1024) {
+    sprintf(buf, "%.1fMB", (float)bytes / (1024.0 * 1024.0));
+  } else if (bytes >= 1024) {
+    sprintf(buf, "%.1fKB", (float)bytes / 1024.0);
+  } else {
+    sprintf(buf, "%luB", bytes);
+  }
   return String(buf);
 }
 
-// ===================== 音频回调 =====================
-void audio_info(const char *info)    { Serial.printf("info: %s\n", info); }
-void audio_id3data(const char *info) { Serial.printf("id3: %s\n", info); }
-void audio_eof_mp3(const char *info) { Serial.println("播放结束"); }
+unsigned long getCurrentTime() {
+  if (!timeSynced) return 0;
+  return syncedTime + (millis() - syncMillis) / 1000;
+}
