@@ -203,6 +203,29 @@ bool btRecvTime = false;
 String bleTxBuffer = "";
 bool bleTxPending = false;
 
+// ===================== 前向声明 (必须在BLE回调类之前) =====================
+void processBtByte(uint8_t b);
+void handleBtCommand(uint8_t cmd);
+void bleSendData(const char* data);
+void bleSendData(const String& data);
+void drawListScreen();
+void drawPlayScreen();
+void drawBtTransferScreen();
+void drawBtProgress();
+void drawBtComplete();
+void drawBtFooter();
+void drawVolumeBar();
+void updateProgress();
+void showMessage(const char* msg);
+void scanAudioFiles();
+String removeExtension(const String& filename);
+String formatSize(uint32_t bytes);
+void playFile(int index);
+void playNext();
+void playPrevious();
+void togglePause();
+unsigned long getCurrentTime();
+
 // ===================== BLE 服务器回调 =====================
 class MyServerCallbacks: public BLEServerCallbacks {
     void onConnect(BLEServer* pServer) {
@@ -227,7 +250,7 @@ class MyServerCallbacks: public BLEServerCallbacks {
 // ===================== BLE 接收回调 =====================
 class MyRxCallbacks: public BLECharacteristicCallbacks {
     void onWrite(BLECharacteristic *pCharacteristic) {
-      std::string rxValue = pCharacteristic->getValue();
+      String rxValue = pCharacteristic->getValue();
       int len = rxValue.length();
       if (len <= 0) return;
 
@@ -239,35 +262,13 @@ class MyRxCallbacks: public BLECharacteristicCallbacks {
     }
 };
 
-// ===================== 前向声明 =====================
-void processBtByte(uint8_t b);
-void handleBtCommand(uint8_t cmd);
-void bleSendData(const char* data);
-void bleSendData(const String& data);
-void drawListScreen();
-void drawPlayScreen();
-void drawBtTransferScreen();
-void drawBtProgress();
-void drawBtComplete();
-void drawBtFooter();
-void drawVolumeBar();
-void showMessage(const char* msg);
-void scanAudioFiles();
-String removeExtension(const String& filename);
-String formatSize(uint32_t bytes);
-void playFile(int index);
-void playNext();
-void playPrevious();
-void togglePause();
-unsigned long getCurrentTime();
-
 // ===================== BLE 发送函数 =====================
 void bleSendData(const char* data) {
   if (!deviceConnected) return;
   int len = strlen(data);
   int offset = 0;
   while (offset < len) {
-    int chunk = min(len - offset, 20);
+    int chunk = (len - offset < 20) ? (len - offset) : 20;
     pTxCharacteristic->setValue((uint8_t*)(data + offset), chunk);
     pTxCharacteristic->notify();
     offset += chunk;
