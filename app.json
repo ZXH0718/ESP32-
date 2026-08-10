@@ -1,0 +1,25 @@
+{
+  "expo": {
+    "name": "🦖 恐龙快跑",
+    "slug": "dino-runner",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "automatic",
+    "splash": {
+      "resizeMode": "contain",
+      "backgroundColor": "#1a1a2e"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.dinorunner.app"
+    },
+    "android": {
+      "package": "com.dinorunner.app",
+      "versionCode": 1,
+      "permissions": ["VIBRATE", "HAPTIC_FEEDBACK"]
+    },
+    "plugins": [
+      "expo-blur"
+    ]
+  }
+}
