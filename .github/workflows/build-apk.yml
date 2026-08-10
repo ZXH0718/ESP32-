@@ -27,7 +27,7 @@ jobs:
           cache: 'gradle'
 
       - name: Install npm dependencies
-        run: npm ci --legacy-peer-deps
+        run: npm install --legacy-peer-deps
 
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
@@ -62,3 +62,16 @@ jobs:
           name: dino-runner-apk
           path: dino-runner-v1.0.0.apk
           retention-days: 30
+
+      - name: Publish to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dino-runner-v1.0.0.apk
+          tag_name: v1.0.0
+          name: 🦖 恐龙快跑 v1.0.0
+          body: |
+            自动构建生成的 APK 安装包。
+          make_latest: true
+          fail_on_unmatched_files: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
