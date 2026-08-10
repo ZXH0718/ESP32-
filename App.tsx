@@ -34,6 +34,7 @@ export default function App() {
   const [lastScore, setLastScore] = useState(0);
   const [showPauseMenu, setShowPauseMenu] = useState(false);
 
+  // 加载历史最高分
   useEffect(() => {
     const loadHighScore = async () => {
       try {
@@ -46,6 +47,7 @@ export default function App() {
     loadHighScore();
   }, []);
 
+  // 状态切换
   const handleStateChange = useCallback((state: GameState) => {
     setGameState(state);
     if (state === 'playing') {
@@ -53,12 +55,14 @@ export default function App() {
     }
   }, []);
 
+  // 分数更新
   const handleScoreUpdate = useCallback((newScore: number, newHigh: number, newIsHigh: boolean) => {
     setScore(newScore);
     setHighScore(newHigh);
     setIsNewHigh(newIsHigh);
   }, []);
 
+  // 游戏结束
   const handleGameOver = useCallback((finalScore: number) => {
     setGameState('gameover');
     setLastScore(finalScore);
@@ -67,14 +71,17 @@ export default function App() {
     }
   }, [highScore]);
 
+  // 重新开始
   const handleRestart = useCallback(() => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     setScore(0);
     setIsNewHigh(false);
     setGameState('idle');
+    // 立即启动
     setTimeout(() => setGameState('playing'), 50);
   }, []);
 
+  // 返回主页
   const handleHome = useCallback(() => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     setScore(0);
@@ -83,6 +90,7 @@ export default function App() {
     setShowPauseMenu(false);
   }, []);
 
+  // 暂停/继续
   const handlePauseToggle = useCallback(() => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     if (gameState === 'playing') {
@@ -121,7 +129,6 @@ export default function App() {
               onGameOver={handleGameOver}
             />
           </View>
-          
           {showGameUI && (
             <View style={styles.topHUD} pointerEvents="box-none">
               <View style={styles.topContent}>
@@ -130,16 +137,12 @@ export default function App() {
                   highScore={highScore}
                   isNewHigh={isNewHigh && Math.floor(score) % 50 === 0}
                 />
-                
                 <TouchableOpacity
                   style={styles.pauseButton}
                   onPress={handlePauseToggle}
                   activeOpacity={0.7}
                 >
-                  <GlassCard
-                    style={styles.pauseCard}
-                    intensity={50}
-                  >
+                  <GlassCard style={styles.pauseCard} intensity={50}>
                     <Text style={styles.pauseIcon}>
                       {gameState === 'paused' ? '▶️' : '⏸️'}
                     </Text>
@@ -148,7 +151,6 @@ export default function App() {
               </View>
             </View>
           )}
-          
           {showGameUI && (
             <View style={styles.bottomHint} pointerEvents="none">
               <View style={styles.hintRow}>
@@ -172,7 +174,6 @@ export default function App() {
           <View style={styles.pauseOverlayBg} />
           <GlassCard style={styles.pauseMenu} intensity={70}>
             <Text style={styles.pauseTitle}>⏸️ 游戏暂停</Text>
-            
             <View style={styles.pauseStats}>
               <View style={styles.pauseStatItem}>
                 <Text style={styles.pauseStatLabel}>当前得分</Text>
@@ -181,7 +182,6 @@ export default function App() {
                 </Text>
               </View>
             </View>
-            
             <View style={styles.pauseButtons}>
               <GlassButton
                 title="继续游戏"

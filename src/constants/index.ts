@@ -1,55 +1,37 @@
 // 游戏常量配置
 export const GAME_CONFIG = {
-  // 游戏区域
   GROUND_HEIGHT: 100,
   DINO_WIDTH: 60,
   DINO_HEIGHT: 70,
-  
-  // 恐龙物理
   GRAVITY: 0.8,
   JUMP_FORCE: -16,
   DOUBLE_JUMP_FORCE: -13,
-  
-  // 障碍物
   OBSTACLE_MIN_WIDTH: 25,
   OBSTACLE_MAX_WIDTH: 50,
   OBSTACLE_MIN_HEIGHT: 35,
   OBSTACLE_MAX_HEIGHT: 70,
   OBSTACLE_MIN_GAP: 350,
   OBSTACLE_MAX_GAP: 600,
-  
-  // 速度
   INITIAL_SPEED: 6,
   MAX_SPEED: 16,
   SPEED_INCREMENT: 0.0015,
-  
-  // 云朵
   CLOUD_SPEED: 2,
   CLOUD_SPAWN_INTERVAL: 120,
-  
-  // 鸟（飞行障碍物）
   BIRD_SPAWN_CHANCE: 0.3,
   BIRD_HEIGHTS: [80, 130, 180],
   BIRD_WIDTH: 50,
   BIRD_HEIGHT: 40,
-  
-  // 分数
   SCORE_MULTIPLIER: 0.1,
 };
 
 // 颜色主题 - iOS 26 玻璃风格
 export const COLORS = {
-  // 背景渐变
   BG_TOP: '#0f0c29',
   BG_MIDDLE: '#302b63',
   BG_BOTTOM: '#24243e',
-  
-  // 玻璃效果
   GLASS_BG: 'rgba(255, 255, 255, 0.12)',
   GLASS_BORDER: 'rgba(255, 255, 255, 0.18)',
   GLASS_SHADOW: 'rgba(0, 0, 0, 0.1)',
-  
-  // 主色调
   PRIMARY: '#00D4FF',
   PRIMARY_GLOW: 'rgba(0, 212, 255, 0.4)',
   ACCENT: '#FF6B9D',
@@ -57,13 +39,9 @@ export const COLORS = {
   SUCCESS: '#4ADE80',
   WARNING: '#FBBF24',
   DANGER: '#F87171',
-  
-  // 文字
   TEXT_PRIMARY: '#FFFFFF',
   TEXT_SECONDARY: 'rgba(255, 255, 255, 0.7)',
   TEXT_TERTIARY: 'rgba(255, 255, 255, 0.5)',
-  
-  // 游戏元素
   DINO_BODY: '#7DD3FC',
   DINO_BELLY: '#E0F2FE',
   DINO_SPIKE: '#38BDF8',
