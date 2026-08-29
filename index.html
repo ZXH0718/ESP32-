@@ -1,0 +1,329 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>西瓜熟度检测仪（手机版）</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+  body {
+    font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    background: linear-gradient(160deg,#0f2b1c 0%,#14532d 60%,#1b7a3d 100%);
+    color: #ecfdf5; min-height: 100vh; padding: max(16px, env(safe-area-inset-top)) 16px 40px;
+    display: flex; flex-direction: column; align-items: center;
+  }
+  .card {
+    width: 100%; max-width: 480px; background: rgba(8,32,20,.72);
+    backdrop-filter: blur(6px); border: 1px solid rgba(255,255,255,.12);
+    border-radius: 20px; padding: 20px; margin-bottom: 16px; box-shadow: 0 10px 30px rgba(0,0,0,.35);
+  }
+  h1 { font-size: 22px; text-align: center; letter-spacing: 1px; margin-bottom: 4px; }
+  .sub { text-align: center; font-size: 13px; opacity: .75; margin-bottom: 16px; }
+  .status-line { display:flex; align-items:center; justify-content:center; gap:8px; margin-bottom: 14px; font-size:14px; }
+  .dot { width: 12px; height: 12px; border-radius: 50%; background: #64748b; flex:none; }
+  .dot.on { background: #22c55e; box-shadow: 0 0 8px #22c55e; animation: pulse 1.2s infinite; }
+  .dot.rec { background: #ef4444; box-shadow: 0 0 8px #ef4444; animation: pulse .7s infinite; }
+  @keyframes pulse { 0%{opacity:1} 50%{opacity:.35} 100%{opacity:1} }
+
+  .result {
+    display:flex; align-items:center; justify-content:center; gap:18px;
+    background: rgba(0,0,0,.25); border-radius: 14px; padding: 16px 14px; margin: 10px 0 14px;
+  }
+  .big-num { font-size: 64px; font-weight: 800; line-height:1; color:#facc15; min-width: 74px; text-align:center; }
+  .verdict { font-size: 20px; font-weight: 700; }
+  .detail { font-size: 13px; opacity:.85; margin-top:6px; line-height:1.5; }
+  .badge { display:inline-block; padding: 3px 10px; border-radius:999px; font-size:12px; font-weight:600; margin-top:8px; }
+  .b-raw{background:#7f1d1d;color:#fecaca}.b-shi{background:#1e3a8a;color:#bfdbfe}
+  .b-good{background:#14532d;color:#bbf7d0}.b-over{background:#3f1d0a;color:#fed7aa}
+
+  canvas { width:100%; height:140px; border-radius:10px; background:#05150d; display:block; }
+
+  .controls { margin-top:14px; font-size:13px; }
+  .ctrl-row { display:flex; align-items:center; justify-content:space-between; margin-top:8px; }
+  .ctrl-row label { flex:none; width:150px; opacity:.9; }
+  .ctrl-row input[type=range] { flex:1; margin:0 10px; accent-color:#22c55e; }
+  .ctrl-row .val { flex:none; width:42px; text-align:right; color:#facc15; font-weight:600; }
+
+  .btn { width:100%; padding:16px; font-size:18px; font-weight:700; color:#052e16;
+    background: linear-gradient(180deg,#4ade80,#22c55e); border:none; border-radius:14px;
+    box-shadow:0 6px 18px rgba(34,197,94,.35); cursor:pointer; letter-spacing:2px; }
+  .btn:active{ transform:translateY(2px); }
+  .btn:disabled{ background:#3f6212; color:#d9f99d; box-shadow:none; cursor:not-allowed; }
+
+  .steps { font-size: 13px; line-height:1.9; padding-left:18px; }
+  .steps li { margin-bottom:4px; }
+  .tip { font-size:12px; opacity:.7; margin-top:10px; line-height:1.6; }
+  a{color:#86efac;}
+</style>
+</head>
+<body>
+  <div class="card">
+    <h1>🍉 西瓜熟度检测</h1>
+    <div class="sub">专利CN109459499A · 麦克风+F-ê 手机实现</div>
+
+    <div class="status-line">
+      <span class="dot" id="dot"></span><span id="statusText">未连接麦克风</span>
+    </div>
+
+    <button class="btn" id="startBtn">🎤 开始检测</button>
+
+    <div class="result" id="result" style="display:none;">
+      <div class="big-num" id="bigNum">-</div>
+      <div>
+        <div class="verdict" id="verdict">等待敲击...</div>
+        <div class="detail" id="detail"></div>
+        <div class="badge" id="badge"></div>
+      </div>
+    </div>
+
+    <canvas id="spec" width="900" height="280"></canvas>
+
+    <div class="controls" id="controls"></div>
+  </div>
+
+  <div class="card">
+    <div class="sub" style="margin-bottom:8px;">使用步骤</div>
+    <ol class="steps">
+      <li>点击「开始检测」，允许麦克风权限。</li>
+      <li>把手机麦克风（底部）贴近西瓜。</li>
+      <li>用手指<strong>快速弹/敲</strong>西瓜表皮一次。</li>
+      <li>短暂停顿后即显示主频与熟度。</li>
+    </ol>
+    <div class="tip">原理来自专利：敲击声音→FFT频域→求主频→映射熟度。
+      手机浏览器需在 HTTPS 或 localhost 下才能用麦克风。</div>
+  </div>
+
+<script>
+/* ============ 可调阈值（熟度 1-9） ============
+   熟度标识说明（取自专利）：
+     1-3 生 | 4-5 适熟 | 6 熟 | 7-9 过熟
+   主频越低越熟（成熟果音低沉），高频率为生瓜。
+   下表给出默认频率映射，可在页面上滑动微调校准。
+   ============================================== */
+const THRESHOLDS = [
+  { up: 999,  label: '7-9 · 过熟', cls:'b-over', note:'频率过低，多半过熟' },
+  { up: 205,  label: '6 · 熟',     cls:'b-good', note:'频率适中，刚刚好' },
+  { up: 240,  label: '4-5 · 适熟', cls:'b-shi',  note:'偏生，再等等更甜' },
+  { up: 9999, label: '1-3 · 生',   cls:'b-raw',  note:'频率偏高，还太生' },
+];
+const FLOOR = 55;    // 频率下限 Hz，滤掉环境低频干扰
+const CEIL  = 500;   // 频率上限 Hz，西瓜共振主频一般在此区间
+const WINDOW = 8192; // FFT 窗长（采样点），约 0.19s @44.1kHz
+
+/* ================= Tool 构造 ================= */
+let audioCtx=null, analyser=null, micStream=null;
+let bufFloat=null, fftPtr=null, working=null;
+let running=false, detectEnabled=false;
+let specCtx=null;
+
+const $  = id => document.getElementById(id);
+const dot=$('dot'), statusText=$('statusText');
+
+function setStatus(txt, mode){
+  dot.className = 'dot' + (mode==='on'?' on':mode==='rec'?' rec':'');
+  statusText.textContent = txt;
+}
+
+/* ================= 控件：阈值滑块 ================= */
+function buildControls(){
+  const box = $('controls');
+  const items = [
+    ['raw',   240, 180, 320, '生瓜上限 (Hz)'],
+    ['shi',   205, 150, 240, '适熟上限 (Hz)'],
+    ['over',  170, 100, 205, '过熟上限 (Hz)'],
+  ];
+  items.forEach(([key, def, min, max, name], i) => {
+    const row = document.createElement('div');
+    row.className = 'ctrl-row';
+    const lab = document.createElement('label'); lab.textContent = name;
+    const rng = document.createElement('input'); rng.type='range';
+    rng.min=min; rng.max=max; rng.step=5; rng.value=def;
+    rng.addEventListener('input', ()=>{ val.textContent = rng.value; _apply(); });
+    const val = document.createElement('span'); val.className='val'; val.textContent=def;
+    row.append(lab, rng, val); box.appendChild(row);
+  });
+}
+function _apply(){
+  const vals = [...document.querySelectorAll('#controls .val')].map(v=>+v.textContent);
+  // vals[] = raw, shi, over; 确保单调递减
+  const raw=vals[0], shi=vals[1], over=vals[2];
+  THRESHOLDS[1].up = over;   // 6熟→过熟 分界
+  THRESHOLDS[2].up = shi;    // 适熟→熟 分界
+  THRESHOLDS[3].up = raw;    // 生→适熟 分界
+}
+
+/* ================= FFT（基2 蝶形） ================= */
+function prepFFT(n){
+  let levels = Math.round(Math.log2(n));
+  const m = 1<<levels;
+  const cos = new Float32Array(m), sin = new Float32Array(m);
+  for(let k=0;k<m;k++){ const a=-2*Math.PI*k/m; cos[k]=Math.cos(a); sin[k]=Math.sin(a); }
+  // 位反转表
+  const rev = new Uint32Array(m);
+  for(let i=0;i<m;i++){ let r=0; for(let j=0;j<levels;j++) r=(r<<1)|((i>>j)&1); rev[i]=r; }
+  return {m, cos, sin, rev, re:new Float32Array(m), im:new Float32Array(m)};
+}
+function runFFT(ptr, x){
+  const {m, cos, sin, rev, re, im} = ptr;
+  // 原地写入复数输入（加窗后的时域）
+  for(let i=0;i<m;i++){ const k=rev[i]; re[k]=x[i]; im[k]=0; }
+  for(let size=2; size<=m; size<<=1){
+    const half=size>>1, step=m/size;
+    for(let i=0;i<m;i+=size){
+      for(let j=0;j<half;j++){
+        const k=j*step;
+        const tr=re[i+j+half]*cos[k]-im[i+j+half]*sin[k];
+        const ti=re[i+j+half]*sin[k]+im[i+j+half]*cos[k];
+        re[i+j+half]=re[i+j]-tr; im[i+j+half]=im[i+j]-ti;
+        re[i+j]+=tr; im[i+j]+=ti;
+      }
+    }
+  }
+  // 输出各频率分量幅值（复数模）
+  const mag = new Float32Array(m/2);
+  for(let i=0;i<m/2;i++) mag[i]=Math.sqrt(re[i]*re[i]+im[i]*im[i]);
+  return mag;
+}
+
+/* ================= 频谱分析：主频提取 ================= */
+function analyze(buffer, sampleRate){
+  const ptr = fftPtr;
+  const n = ptr.m;
+  // 直接从 buffer（环形）尾部取满 n 点做窗
+  const base = Math.max(0, buffer.length - n);
+  const x = new Float32Array(n);
+  for(let i=0;i<n;i++){
+    const s = buffer[(base+i) % buffer.length];
+    const w = 0.54 - 0.46*Math.cos(2*Math.PI*i/(n-1)); // hamming 窗
+    x[i] = s*w;
+  }
+  const mag = runFFT(ptr, x);
+  const binHz = sampleRate/n;
+  // 在有效共振区间内找能量峰值 → 主频
+  const iMin = Math.max(1, Math.floor(FLOOR/binHz));
+  const iMax = Math.min(n/2, Math.ceil(CEIL/binHz));
+  let peak=0, peakIdx=iMin;
+  for(let i=iMin;i<=iMax;i++){
+    if(mag[i]>peak){ peak=mag[i]; peakIdx=i; }
+  }
+  return { domHz: peakIdx*binHz, mag, peak };
+}
+
+/* ================= 阈值→熟度 ================= */
+function classify(freq){
+  for(const t of THRESHOLDS){
+    if(freq < t.up) return t;
+  }
+  return THRESHOLDS[0];
+}
+function renderSpec({mag}, sampleRate){
+  if(!specCtx) specCtx = $('spec').getContext('2d');
+  const cw = $('spec').width, ch = $('spec').height;
+  specCtx.clearRect(0,0,cw,ch);
+  const n = fftPtr.m;
+  const binHz = sampleRate/n;
+  const iMin = Math.floor(FLOOR/binHz), iMax = Math.min(n/2, Math.ceil(CEIL/binHz));
+  // 归一化
+  let maxV=1e-6;
+  for(let i=iMin;i<=iMax;i++) maxV=Math.max(maxV, mag[i]);
+  specCtx.strokeStyle = '#4ade80'; specCtx.lineWidth=2;
+  specCtx.beginPath();
+  let peak=0, pIdx=0;
+  for(let i=iMin;i<=iMax;i++){
+    const v = mag[i]/maxV;
+    const x = (i-iMin)/(iMax-iMin)*cw;
+    const y = ch - v*ch;
+    if(v>peak){peak=v;pIdx=i;}
+    if(i===iMin) specCtx.moveTo(x,y); else specCtx.lineTo(x,y);
+  }
+  specCtx.stroke();
+  // 主频标记
+  if(peak>0.05){
+    const x=(pIdx-iMin)/(iMax-iMin)*cw;
+    specCtx.strokeStyle='#facc15'; specCtx.lineWidth=3;
+    specCtx.beginPath(); specCtx.moveTo(x,0); specCtx.lineTo(x,ch); specCtx.stroke();
+    specCtx.fillStyle='#facc15'; specCtx.font='20px sans-serif'; specCtx.textAlign='center';
+    specCtx.fillText(Math.round(pIdx*binHz)+'Hz', x, ch-8);
+  }
+}
+
+/* ================= 检测核心 ================= */
+function computeAndShow(){
+  if(!running || !detectEnabled) return;
+  const sr = audioCtx.sampleRate;
+  // 从 analyser 拷贝当前时域数据
+  analyser.getFloatTimeDomainData(bufFloat);
+  const res = analyze(bufFloat, sr);
+  renderSpec(res, sr);
+  const info = classify(res.domHz);
+  showResult(res.domHz, info);
+  // 自动停止本次检测
+  stopTapCapture();
+  setStatus('主频 ' + Math.round(res.domHz) + ' Hz', 'on');
+}
+
+let tapTimer=null;
+function startTapCapture(){
+  detectEnabled=true;
+  setStatus('请敲击西瓜…', 'rec');
+  $('startBtn').disabled=true;
+  $('startBtn').textContent='🎤 敲击中…';
+  tapTimer = setTimeout(computeAndShow, 700); // 敲击后约 0.7s 采样分析
+}
+function stopTapCapture(){
+  detectEnabled=false;
+  clearTimeout(tapTimer);
+  $('startBtn').disabled=false;
+  $('startBtn').textContent='🔄 再测一次';
+}
+
+function showResult(hz, info){
+  $('result').style.display='flex';
+  $('bigNum').textContent = Math.round(hz);
+  $('verdict').textContent = info.label;
+  $('detail').textContent = info.note + '（主频 ≈ ' + Math.round(hz) + ' Hz）';
+  const badge=$('badge');
+  badge.className='badge '+info.cls;
+  badge.textContent = hz>=FLOOR&&hz<=CEIL ? info.label.split('·')[1] : '超出判断区间';
+}
+function showNoise(){
+  $('result').style.display='flex';
+  $('bigNum').textContent='--';
+  $('verdict').textContent='信号弱，请重敲';
+  $('detail').textContent='未捕捉到明显共振主频，请贴近西瓜再敲一次';
+  $('badge').className='badge b-shi';
+  $('badge').textContent='重试';
+}
+
+/* ================= 开始/停止 ================= */
+$('startBtn').addEventListener('click', async () => {
+  if(!audioCtx){
+    try{
+      micStream = await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:false, noiseSuppression:false, autoGainControl:false}});
+      audioCtx = new (window.AudioContext||window.webkitAudioContext)();
+      await audioCtx.resume();
+      const src = audioCtx.createMediaStreamSource(micStream);
+      analyser = audioCtx.createAnalyser();
+      analyser.fftSize = WINDOW;
+      analyser.smoothingTimeConstant = 0;
+      src.connect(analyser);
+      bufFloat = new Float32Array(analyser.fftSize);
+      fftPtr = prepFFT(WINDOW);
+      buildControls();
+      running = true;
+      setStatus('就绪，请敲击西瓜', 'on');
+      $('startBtn').textContent='🔄 重新开始';
+    }catch(e){
+      setStatus('麦克风不可用：'+ (e.name||e.message), '');
+      alert('无法访问麦克风。请使用 HTTPS 或 localhost 打开，并允许麦克风权限。');
+      return;
+    }
+  }
+  startTapCapture();
+});
+
+// 初始化画布
+$('spec').width = Math.max(320, Math.min(900, window.innerWidth));
+</script>
+</body>
+</html>
