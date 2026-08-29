@@ -1,0 +1,8 @@
+<resources>
+    <style name="Theme.Watermelon" parent="Theme.AppCompat">
+        <item name="colorPrimary">#22C55E</item>
+        <item name="colorPrimaryDark">#14532D</item>
+        <item name="colorAccent">#22C55E</item>
+        <item name="android:windowBackground">@color/dark</item>
+    </style>
+</resources>

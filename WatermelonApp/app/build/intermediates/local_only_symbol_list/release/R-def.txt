@@ -1,0 +1,12 @@
+R_DEF: Internal format may change without notice
+local
+color dark
+color green
+id bigNum
+id btn
+id detail
+id status
+id verdict
+layout activity_main
+string app_name
+style Theme.Watermelon
