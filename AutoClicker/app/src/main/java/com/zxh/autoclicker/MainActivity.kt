@@ -90,7 +90,7 @@ class MainActivity : Activity() {
             etY = textInput("Y 坐标", "800")
             addView(inputRow("Y 坐标", etY))
 
-            etInterval = textInput("1000")
+            etInterval = textInput("输入间隔", "1000")
             addView(inputRow("间隔(毫秒)", etInterval))
 
             addView(spacer())
@@ -137,8 +137,9 @@ class MainActivity : Activity() {
         setPadding(0, 0, 0, dp(12))
     }
 
-    private fun textInput(hint: String) = EditText(this).apply {
+    private fun textInput(hint: String, default: String = "") = EditText(this).apply {
         this.hint = hint
+        setText(default)
         inputType = android.text.InputType.TYPE_CLASS_NUMBER or
             android.text.InputType.TYPE_NUMBER_FLAG_DECIMAL
     }
