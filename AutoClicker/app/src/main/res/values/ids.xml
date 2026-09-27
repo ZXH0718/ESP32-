@@ -1,0 +1,5 @@
+<resources>
+    <item name="btnEnable" type="id" />
+    <item name="btnStart" type="id" />
+    <item name="btnStop" type="id" />
+</resources>

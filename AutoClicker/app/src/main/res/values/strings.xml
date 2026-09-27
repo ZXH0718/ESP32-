@@ -1,0 +1,5 @@
+<resources>
+    <string name="app_name">连点器</string>
+    <string name="service_name">自动连点服务</string>
+    <string name="accessibility_description">连点器需要使用无障碍服务权限，以便在指定坐标以设定频率自动执行点击操作。</string>
+</resources>

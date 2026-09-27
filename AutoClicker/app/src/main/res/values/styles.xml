@@ -1,0 +1,3 @@
+<resources>
+    <style name="Theme.AutoClicker" parent="android:Theme.DeviceDefault.Light.DarkActionBar" />
+</resources>
